@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>D&D Scheduler - Poll</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #f5f7fa;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        
+        h1 {
+            color: #333;
+            font-size: 28px;
+        }
+        
+        .poll-container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .poll-info {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        
+        .info-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            color: #666;
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+        
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .availability-grid {
+            overflow-x: auto;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 600px;
+        }
+        
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #e0e0e0;
+        }
+        
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        
+        th.player-name {
+            background: #f5f7fa;
+            color: #333;
+            min-width: 150px;
+        }
+        
+        .date-header {
+            text-align: center;
+            min-width: 120px;
+        }
+        
+        .score-cell {
+            font-weight: 600;
+            color: white;
+        }
+        
+        .best-score {
+            background: #e8f5e9 !important;
+            color: #2e7d32 !important;
+        }
+
+        
+        td.clickable {
+            cursor: pointer;
+            transition: background-color 0.2s;
+            text-align: center;
+        }
+        
+        td.clickable:hover {
+            background: #f5f7fa;
+        }
+        
+        .availability-yes {
+            background: #c8e6c9;
+            color: #2e7d32;
+        }
+        
+        .availability-if_needed {
+            background: #fff9c4;
+            color: #f57f17;
+        }
+        
+        .availability-maybe {
+            background: #ffe0b2;
+            color: #e65100;
+        }
+        
+        .availability-no {
+            background: #ffcdd2;
+            color: #c62828;
+        }
+        
+        .availability-none {
+            background: #f5f5f5;
+            color: #999;
+        }
+        
+        .admin-controls {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 2px solid #e0e0e0;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+        
+        .modal-content {
+            background: white;
+            margin: 100px auto;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 500px;
+            width: 90%;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .close {
+            font-size: 28px;
+            font-weight: bold;
+            color: #999;
+            cursor: pointer;
+        }
+        
+        .close:hover {
+            color: #333;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        
+        select, input[type="date"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        
+        .legend {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+            padding: 15px;
+            background: #f5f7fa;
+            border-radius: 8px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .legend-box {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+        }
+        
+        @media (max-width: 768px) {
+            .poll-container {
+                padding: 15px;
+            }
+            
+            th, td {
+                padding: 8px;
+                font-size: 12px;
+            }
+        }
+        /* DARK MODE STYLES */
+        body.dark-mode {
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        body.dark-mode .best-score {
+            background: #1b5e20 !important; /* Dark green background */
+            color: #a5d6a7 !important;      /* Light green text */
+        }
+
+        
+        body.dark-mode .header,
+        body.dark-mode .poll-container,
+        body.dark-mode .modal-content,
+        body.dark-mode .legend {
+            background: #2d2d2d;
+            color: #e0e0e0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        body.dark-mode .legend {
+            background: #3a3a3a;
+        }
+
+        body.dark-mode h1, 
+        body.dark-mode h2, 
+        body.dark-mode label,
+        body.dark-mode .info-row,
+        body.dark-mode th.player-name {
+            background: #2d2d2d;
+            color: #e0e0e0;
+            border-color: #444;
+        }
+
+        body.dark-mode th {
+            border-color: #444;
+        }
+
+        body.dark-mode td {
+            border-color: #444;
+            color: #e0e0e0;
+        }
+
+        body.dark-mode td:hover {
+            background-color: #3a3a3a;
+        }
+
+        body.dark-mode select,
+        body.dark-mode input {
+            background: #1a1a1a;
+            color: #e0e0e0;
+            border-color: #444;
+        }
+
+        body.dark-mode .poll-info,
+        body.dark-mode .admin-controls {
+            border-color: #444;
+        }
+        
+        /* Adjust availability colors for dark mode to be less harsh */
+        body.dark-mode .availability-yes { background: #1b5e20; color: #a5d6a7; }
+        body.dark-mode .availability-if_needed { background: #f57f17; color: #fff59d; }
+        body.dark-mode .availability-maybe { background: #e65100; color: #ffcc80; }
+        body.dark-mode .availability-no { background: #b71c1c; color: #ef9a9a; }
+        body.dark-mode .availability-none { background: #424242; color: #9e9e9e; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1 id="poll-title">🎲 Loading...</h1>
+        <div style="display: flex; gap: 10px;">
+            <button id="darkModeBtn" class="btn btn-secondary" onclick="toggleDarkMode()">🌙 Dark Mode</button>
+            <button class="btn btn-secondary" onclick="window.location.href='/admin'">← Back to Admin</button>
+        </div>
+    </div>
+    
+    <div class="poll-container">
+        <div class="poll-info" id="poll-info"></div>
+        
+        <div class="availability-grid">
+            <table id="availability-table">
+                <thead id="table-header"></thead>
+                <tbody id="table-body"></tbody>
+            </table>
+        </div>
+        
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-box availability-yes"></div>
+                <span>Yes (+3)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box availability-if_needed"></div>
+                <span>If Needed (+2)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box availability-maybe"></div>
+                <span>Maybe (+1)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box availability-no"></div>
+                <span>No (0)</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box availability-none"></div>
+                <span>Clear (unset)</span>
+            </div>
+        </div>
+        
+        <div class="admin-controls" id="admin-controls"></div>
+    </div>
+    
+    <!-- Select Date Modal -->
+    <div id="select-date-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Select Final Date</h2>
+                <span class="close" onclick="closeSelectDateModal()">&times;</span>
+            </div>
+            
+            <form id="select-date-form">
+                <div class="form-group">
+                    <label>Choose the session date:</label>
+                    <select id="date-select" required></select>
+                </div>
+                
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Confirm & Close Poll</button>
+            </form>
+        </div>
+    </div>
+    
+    <script>
+        const pollSlug = '{{ poll_slug }}';
+        let pollData = null;
+        
+        async function loadPoll() {
+            const response = await fetch(`/api/polls/${pollSlug}`);
+            pollData = await response.json();
+            renderPoll();
+        }
+        
+        function renderPoll() {
+            const poll = pollData.poll;
+            
+            document.getElementById('poll-title').textContent = 
+                `${poll.campaign_name} - Session ${poll.session_number}`;
+            
+            const pollInfo = document.getElementById('poll-info');
+            let statusHtml = '';
+            
+            if (poll.is_closed) {
+                if (poll.selected_date) {
+                    statusHtml = `<div class="info-row" style="color: #2e7d32; font-weight: 600;">✅ Scheduled for: ${poll.selected_date}</div>`;
+                } else {
+                    statusHtml = `<div class="info-row" style="color: #f44336; font-weight: 600;">🚫 Session Cancelled (No Date Selected)</div>`;
+                }
+            }
+            
+            pollInfo.innerHTML = `
+                <h2>Session ${poll.session_number}</h2>
+                <div class="info-row">📅 Poll Period: ${poll.start_date} to ${poll.end_date}</div>
+                <div class="info-row">🕐 Session Time: ${poll.session_time_start} - ${poll.session_time_end} (${poll.timezone})</div>
+                ${statusHtml}
+            `;
+            
+            // Render table header
+            const header = document.getElementById('table-header');
+            header.innerHTML = `
+                <tr>
+                    <th class="player-name">Player</th>
+                    ${pollData.dates.map(date => `
+                        <th class="date-header">${formatDate(date)}</th>
+                    `).join('')}
+                </tr>
+                <tr>
+                    <th class="player-name">Score</th>
+                    ${pollData.dates.map(date => {
+                        const score = pollData.date_scores[date] || 0;
+                        const maxScore = Math.max(...Object.values(pollData.date_scores));
+                        const isBest = score === maxScore && score > 0;
+                        return `<th class="score-cell ${isBest ? 'best-score' : ''}">${score}</th>`;
+                    }).join('')}
+                </tr>
+            `;
+            
+            // Render table body
+            const body = document.getElementById('table-body');
+            body.innerHTML = pollData.players.map(player => {
+                // Check if this player is the DM
+                const dmBadge = player.is_dm 
+                    ? '<span title="Dungeon Master" style="cursor:help; margin-left:5px;">👑</span>' 
+                    : '';
+                
+                return `
+                    <tr>
+                        <td style="font-weight: 600;">
+                            ${player.name} ${dmBadge}
+                        </td>
+                        ${pollData.dates.map(date => {
+                            // ... existing code for cells ...
+                            const response = pollData.responses.find(r => 
+                                r.player_id === player.id && r.response_date === date
+                            );
+                            const availability = response ? response.availability : 'none';
+                            // ... existing code ...
+                            const text = {
+                                'yes': '✅ Yes',
+                                'if_needed': '🟡 If Needed',
+                                'maybe': '🟠 Maybe',
+                                'no': '❌ No',
+                                'none': '-'
+                            }[availability];
+                            
+                            return `
+                                <td class="clickable availability-${availability}" 
+                                    onclick="changeAvailability(${player.id}, '${date}', '${availability}')"
+                                    ${poll.is_closed ? 'style="cursor: not-allowed;"' : ''}>
+                                    ${text}
+                                </td>
+                            `;
+                        }).join('')}
+                    </tr>
+                `;
+            }).join('');
+            
+            // Render admin controls
+            const controls = document.getElementById('admin-controls');
+            if (!poll.is_closed) {
+                const maxScore = Math.max(...Object.values(pollData.date_scores));
+                const bestDates = Object.entries(pollData.date_scores)
+                    .filter(([_, score]) => score === maxScore && score > 0)
+                    .map(([date, _]) => date);
+                
+                controls.innerHTML = `
+                    <button class="btn btn-primary" onclick="showSelectDateModal()">
+                        📅 Select Date & Close
+                    </button>
+                    <button class="btn btn-secondary" style="background: #ff9800; color: white;" onclick="cancelSession()">
+                        🚫 Scrub/Cancel Session
+                    </button>
+                    <button class="btn btn-danger" onclick="deletePoll()">
+                        🗑️ Delete Poll
+                    </button>
+                    ${bestDates.length > 0 ? `
+                        <div style="flex: 1; min-width: 200px; padding: 10px; background: #e8f5e9; border-radius: 8px; color: #333;">
+                            <strong>Best Date${bestDates.length > 1 ? 's' : ''}:</strong> 
+                            ${bestDates.map(d => formatDate(d)).join(', ')}
+                        </div>
+                    ` : ''}
+                `;
+            } else {
+                controls.innerHTML = `
+                    <button class="btn btn-secondary" onclick="reopenPoll()">
+                        🔓 Reopen Poll
+                    </button>
+                    <button class="btn btn-danger" onclick="deletePoll()">
+                        🗑️ Delete Poll
+                    </button>
+                `;
+            }
+        }
+        
+        function formatDate(dateStr) {
+            const date = new Date(dateStr + 'T00:00:00');
+            return date.toLocaleDateString('en-US', { 
+                weekday: 'short', 
+                month: 'short', 
+                day: 'numeric' 
+            });
+        }
+        
+        async function cancelSession() {
+            if (!confirm('Are you sure you want to CANCEL this session? No date will be selected, and a cancellation notification will be sent.')) {
+                return;
+            }
+            
+            // Send null as the selected_date
+            await fetch(`/api/polls/${pollSlug}/close`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected_date: null })
+            });
+            
+            loadPoll();
+        }
+        
+        async function changeAvailability(playerId, date, currentAvailability) {
+            if (pollData.poll.is_closed) {
+                alert('This poll is closed and cannot be modified.');
+                return;
+            }
+            
+            const options = ['yes', 'if_needed', 'maybe', 'no', 'clear'];
+            const currentIndex = options.indexOf(currentAvailability);
+            const nextIndex = (currentIndex + 1) % options.length;
+            const newAvailability = currentIndex === -1 ? 'yes' : options[nextIndex];
+            
+            if (newAvailability === 'clear') {
+                // Delete the response
+                await fetch('/api/responses/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        poll_id: pollData.poll.id,
+                        player_id: playerId,
+                        response_date: date
+                    })
+                });
+            } else {
+                // Save the response
+                await fetch('/api/responses', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        poll_id: pollData.poll.id,
+                        player_id: playerId,
+                        response_date: date,
+                        availability: newAvailability
+                    })
+                });
+            }
+            
+            loadPoll();
+        }
+        
+        function showSelectDateModal() {
+            const select = document.getElementById('date-select');
+            select.innerHTML = pollData.dates.map(date => `
+                <option value="${date}">${formatDate(date)}</option>
+            `).join('');
+            
+            // Pre-select best date if there's only one
+            const maxScore = Math.max(...Object.values(pollData.date_scores));
+            const bestDates = Object.entries(pollData.date_scores)
+                .filter(([_, score]) => score === maxScore && score > 0)
+                .map(([date, _]) => date);
+            
+            if (bestDates.length === 1) {
+                select.value = bestDates[0];
+            }
+            
+            document.getElementById('select-date-modal').style.display = 'block';
+        }
+        
+        function closeSelectDateModal() {
+            document.getElementById('select-date-modal').style.display = 'none';
+        }
+        
+        document.getElementById('select-date-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const selectedDate = document.getElementById('date-select').value;
+            
+            await fetch(`/api/polls/${pollSlug}/close`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ selected_date: selectedDate })
+            });
+            
+            closeSelectDateModal();
+            loadPoll();
+        });
+        
+        async function deletePoll() {
+            if (!confirm('Are you sure you want to delete this poll?')) {
+                return;
+            }
+            
+            await fetch(`/api/polls/${pollSlug}`, { method: 'DELETE' });
+            window.location.href = '/admin';
+        }
+        
+        async function reopenPoll() {
+            if (!confirm('Are you sure you want to reopen this poll? This will clear the selected date.')) {
+                return;
+            }
+            
+            await fetch(`/api/polls/${pollSlug}/reopen`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            loadPoll();
+        }
+        
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+        
+        loadPoll();
+        
+        // Dark mode toggle
+        function toggleDarkMode() {
+            document.body.classList.toggle('dark-mode');
+            const isDark = document.body.classList.contains('dark-mode');
+            localStorage.setItem('darkMode', isDark);
+            updateDarkModeButton(isDark);
+        }
+        
+        function updateDarkModeButton(isDark) {
+            const btn = document.getElementById('darkModeBtn');
+            if (btn) {
+                btn.textContent = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+            }
+        }
+        
+        // Load dark mode preference
+        const savedDarkMode = localStorage.getItem('darkMode') === 'true';
+        if (savedDarkMode) {
+            document.body.classList.add('dark-mode');
+        }
+        // Initialize button text on load
+        updateDarkModeButton(savedDarkMode);
+    </script>
+</body>
+</html>
