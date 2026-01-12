@@ -358,7 +358,7 @@
             <button class="btn btn-primary" onclick="showCreateCampaign()">+ New Campaign</button>
             <button class="btn btn-secondary" onclick="showAllPolls()">📊 All Polls</button>
             <button class="btn btn-secondary" onclick="toggleDarkMode()">🌙 Dark Mode</button>
-            <button class="btn btn-secondary" onclick="window.location.href='/audit'">🛡️ Audit Log</button>
+            <button class="btn btn-secondary" onclick="window.location.href='/audit'">🛡 Audit Log</button>
             <button class="btn btn-secondary" onclick="window.location.href='/logout'">Logout</button>
         </div>
     </div>
@@ -568,16 +568,30 @@
                     <div class="campaign-info">📅 Every ${campaign.recurrence_days} days</div>
                     <div class="campaign-info">🕐 ${campaign.session_time_start} - ${campaign.session_time_end}</div>
                     
-                    <div class="campaign-actions">
-                        <button class="btn btn-primary" onclick="showStats(${campaign.id})">📊 Stats</button>
-                        <button class="btn btn-primary" onclick="showCampaignPolls(${campaign.id})">📋 Polls</button>
-                        <button class="btn btn-secondary" onclick="showCreatePoll(${campaign.id})">+ Poll</button>
-                        <button class="btn btn-secondary" onclick="editCampaign(${campaign.id})">✏️ Edit</button>
+                    <div class="campaign-actions" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">
+                        
+                        <button class="btn btn-primary" style="grid-column: span 2;" onclick="showStats(${campaign.id})">
+                            📖 Open Campaign
+                        </button>
+                        
+                        <button class="btn btn-primary" onclick="showCampaignPolls(${campaign.id})">
+                            📋 Polls
+                        </button>
+                        <button class="btn btn-secondary" onclick="showCreatePoll(${campaign.id})">
+                            ➕ Poll
+                        </button>
+                        
+                        <button class="btn btn-secondary" onclick="editCampaign(${campaign.id})">
+                            ✏️ Edit
+                        </button>
                         ${campaign.is_active ? 
-                            `<button class="btn btn-secondary" onclick="endCampaign(${campaign.id})">🏁 End Campaign</button>` : 
-                            `<button class="btn btn-primary" onclick="resumeCampaign(${campaign.id})">▶️ Resume Campaign</button>`
+                            `<button class="btn btn-secondary" onclick="endCampaign(${campaign.id})">⏸️ Pause</button>` : 
+                            `<button class="btn btn-primary" onclick="resumeCampaign(${campaign.id})">▶️ Resume</button>`
                         }
-                        <button class="btn btn-danger" onclick="deleteCampaign(${campaign.id})">🗑️ Delete Campaign</button>
+                        
+                        <button class="btn btn-danger" style="grid-column: span 2;" onclick="deleteCampaign(${campaign.id})">
+                            🗑️ Delete Campaign
+                        </button>
                     </div>
                 `;
                 
@@ -1214,7 +1228,7 @@
             
             // Update button text
             const btn = event.target;
-            btn.textContent = isDark ? '☀️ Light Mode' : '🌙 Dark Mode';
+            btn.textContent = isDark ? '☀ Light Mode' : '🌙 Dark Mode';
         }
         
         // Load dark mode preference
