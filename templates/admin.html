@@ -655,13 +655,17 @@
             document.getElementById('campaign-time-end').value = campaign.session_time_end;
             document.getElementById('campaign-polls-advance').value = campaign.polls_in_advance;
             document.getElementById('campaign-timezone').value = campaign.timezone;
+            
+            // --- ADD THIS LINE HERE ---
+            document.getElementById('campaign-webhook').value = campaign.discord_webhook || '';
+            // --------------------------
+
             document.getElementById('campaign-deadline-respond').value = campaign.deadline_respond || 14;
             document.getElementById('campaign-deadline-decide').value = campaign.deadline_decide || 7;
             
             // Load players for this campaign
             const response = await fetch(`/api/campaigns/${id}/players`);
             const data = await response.json();
-            // The API now returns objects {name: "...", is_dm: ...}, which matches our new internal structure
             players = data.players || [];
             renderPlayers();
             
