@@ -104,6 +104,19 @@ def init_db():
     
     cursor = conn.cursor()
     
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ip_address VARCHAR(45) NOT NULL,
+            action VARCHAR(50) NOT NULL,
+            details TEXT,
+            resource_type VARCHAR(50),
+            resource_id INT
+        )
+    ''')
+    conn.commit()
+    
     # Campaigns table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS campaigns (
@@ -266,6 +279,68 @@ def admin_panel():
 def poll_view(slug):
     return render_template('poll.html', poll_slug=slug)
 
+def log_audit(action, details=None, resource_type=None, resource_id=None):
+    try:
+        conn = get_db()
+        if not conn:
+            return
+            
+        cursor = conn.cursor()
+        
+        # Determine IP Address
+        ip_address = "System"
+        try:
+            # Check if we are in a Flask request context
+            if request:
+                # Trust X-Forwarded-For because you use Nginx
+                if request.headers.get('X-Forwarded-For'):
+                    ip_address = request.headers.get('X-Forwarded-For').split(',')[0]
+                else:
+                    ip_address = request.remote_addr
+        except RuntimeError:
+            # We are in a background job (scheduler), no request context exists
+            pass
+
+        cursor.execute('''
+            INSERT INTO audit_log (ip_address, action, details, resource_type, resource_id)
+            VALUES (%s, %s, %s, %s, %s)
+        ''', (ip_address, action, details, resource_type, resource_id))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        print(f"Failed to write audit log: {e}")
+
+@app.route('/audit')
+@login_required
+def audit_view():
+    return render_template('audit.html')
+
+@app.route('/api/audit')
+@login_required
+def get_audit_logs():
+    try:
+        conn = get_db()
+        cursor = conn.cursor(dictionary=True)
+        # Limit to last 500 events to prevent browser lag
+        cursor.execute('''
+            SELECT * FROM audit_log 
+            ORDER BY timestamp DESC 
+            LIMIT 500
+        ''')
+        logs = cursor.fetchall()
+        
+        for log in logs:
+            if hasattr(log.get('timestamp'), 'isoformat'):
+                log['timestamp'] = log['timestamp'].isoformat()
+                
+        cursor.close()
+        conn.close()
+        return jsonify({'logs': logs})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # API Routes
 
 @app.route('/api/campaigns', methods=['GET'])
@@ -339,6 +414,7 @@ def create_campaign():
     ))
     
     campaign_id = cursor.lastrowid
+    log_audit('CAMPAIGN_CREATE', f"Created campaign '{data['name']}'", 'campaign', campaign_id)
     
     # Add players (This works for both create_campaign and update_campaign)
     if 'players' in data:
@@ -427,6 +503,14 @@ def update_campaign(campaign_id):
         else:
             # If the list was explicitly cleared
             cursor.execute("DELETE FROM players WHERE campaign_id = %s", (campaign_id,))
+            
+    action_type = 'CAMPAIGN_UPDATE'
+    if data.get('is_active') is False:
+        action_type = 'CAMPAIGN_PAUSE'
+    elif data.get('is_active') is True:
+        action_type = 'CAMPAIGN_RESUME'
+        
+    log_audit(action_type, f"Updated campaign '{data['name']}'", 'campaign', campaign_id)
     
     conn.commit()
     cursor.close()
@@ -442,6 +526,7 @@ def update_campaign(campaign_id):
 def delete_campaign(campaign_id):
     conn = get_db()
     cursor = conn.cursor()
+    log_audit('CAMPAIGN_DELETE', f"Deleted campaign ID {campaign_id}", 'campaign', campaign_id)
     cursor.execute('DELETE FROM campaigns WHERE id = %s', (campaign_id,))
     conn.commit()
     cursor.close()
@@ -734,6 +819,7 @@ def create_poll():
                 f"Please vote on your availability from {data['start_date']} to {data['end_date']}",
                 f"{request.url_root}poll/{slug}"
             )
+    log_audit('POLL_CREATE', f"Created session {next_session} poll ({data['start_date']} to {data['end_date']})", 'poll', poll_id)
     
     conn.commit()
     cursor.close()
@@ -886,6 +972,7 @@ def delete_poll(slug):
         ''', (campaign_id, deleted_session_number))
         
         conn.commit()
+    log_audit('POLL_DELETE', f"Deleted poll {slug}", 'poll', None)
     
     cursor.close()
     conn.close()
@@ -948,6 +1035,8 @@ def close_poll(slug):
                 f"No suitable date was found for Session {poll_info['session_number']}",
                 poll_url
             )
+    status = "Scheduled" if selected_date else "Cancelled"
+    log_audit('POLL_CLOSE', f"Poll {slug} closed. Result: {status} ({selected_date})", 'poll', None)
     
     conn.commit()
     cursor.close()
@@ -962,6 +1051,7 @@ def reopen_poll(slug):
     cursor = conn.cursor()
     
     cursor.execute('UPDATE polls SET is_closed = FALSE, selected_date = NULL WHERE slug = %s', (slug,))
+    log_audit('POLL_REOPEN', f"Reopened poll {slug}", 'poll', None)
     
     conn.commit()
     cursor.close()
@@ -976,6 +1066,17 @@ def save_response():
     conn = get_db()
     cursor = conn.cursor()
     
+    # 1. Lookup Player Name for the Audit Log
+    player_name = f"Player {data['player_id']}" # Default fallback
+    try:
+        cursor.execute('SELECT name FROM players WHERE id = %s', (data['player_id'],))
+        result = cursor.fetchone()
+        if result:
+            player_name = result[0]
+    except Exception:
+        pass # If lookup fails, we stick with "Player 8"
+
+    # 2. Save the Vote
     cursor.execute('''
         INSERT INTO responses (poll_id, player_id, response_date, availability)
         VALUES (%s, %s, %s, %s)
@@ -987,6 +1088,9 @@ def save_response():
         data['availability'],
         data['availability']
     ))
+    
+    # 3. Log using the actual name
+    log_audit('VOTE_CAST', f"{player_name} voted '{data['availability']}' on {data['response_date']}", 'response', data['poll_id'])
     
     conn.commit()
     cursor.close()
@@ -1001,6 +1105,17 @@ def delete_response():
     conn = get_db()
     cursor = conn.cursor()
     
+    # 1. Lookup Name
+    player_name = f"Player {data['player_id']}"
+    try:
+        cursor.execute('SELECT name FROM players WHERE id = %s', (data['player_id'],))
+        result = cursor.fetchone()
+        if result:
+            player_name = result[0]
+    except Exception:
+        pass
+
+    # 2. Delete Response
     cursor.execute('''
         DELETE FROM responses 
         WHERE poll_id = %s AND player_id = %s AND response_date = %s
@@ -1009,6 +1124,9 @@ def delete_response():
         data['player_id'],
         data['response_date']
     ))
+    
+    # 3. Log it
+    log_audit('VOTE_CLEAR', f"{player_name} cleared vote for {data['response_date']}", 'response', data['poll_id'])
     
     conn.commit()
     cursor.close()
@@ -1040,6 +1158,7 @@ def send_discord_notification(webhook_url, title, description, link=None):
             
             # If successful, we are done
             if response.status_code in [200, 204]:
+                log_audit('NOTIFICATION_SENT', f"Sent Discord notification: {title}", 'system', None)
                 return
             
             # If rate limited (429), wait and retry

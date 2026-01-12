@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Party Planner - Audit Log</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 { font-size: 24px; color: #333; }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            background: #e0e0e0;
+            color: #333;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            overflow-x: auto;
+        }
+
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+        th { background: #f9f9f9; font-weight: 600; color: #555; position: sticky; top: 0; }
+        tr:hover { background: #f5f7fa; }
+
+        .tag {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .tag-system { background: #eee; color: #666; }
+        .tag-create { background: #e8f5e9; color: #2e7d32; }
+        .tag-delete { background: #ffebee; color: #c62828; }
+        .tag-update { background: #e3f2fd; color: #1565c0; }
+        .tag-vote { background: #fff3e0; color: #ef6c00; }
+
+        /* Dark Mode */
+        body.dark-mode { background: #1a1a1a; color: #e0e0e0; }
+        body.dark-mode .header, body.dark-mode .container { background: #2d2d2d; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+        body.dark-mode h1 { color: #e0e0e0; }
+        body.dark-mode th { background: #333; color: #e0e0e0; border-bottom-color: #444; }
+        body.dark-mode td { border-bottom-color: #444; color: #ccc; }
+        body.dark-mode tr:hover { background: #3a3a3a; }
+        
+        body.dark-mode .tag-system { background: #424242; color: #ccc; }
+        body.dark-mode .tag-create { background: #1b5e20; color: #a5d6a7; }
+        body.dark-mode .tag-delete { background: #b71c1c; color: #ef9a9a; }
+        body.dark-mode .tag-update { background: #0d47a1; color: #90caf9; }
+        body.dark-mode .tag-vote { background: #e65100; color: #ffcc80; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ System Audit Log</h1>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn" onclick="toggleDarkMode()">🌙 Dark Mode</button>
+            <button class="btn" onclick="window.location.href='/admin'">← Back to Admin</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>IP Address</th>
+                    <th>Action</th>
+                    <th>Details</th>
+                    <th>Resource</th>
+                </tr>
+            </thead>
+            <tbody id="log-body">
+                <tr><td colspan="5" style="text-align:center">Loading logs...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        async function loadLogs() {
+            try {
+                const response = await fetch('/api/audit');
+                const data = await response.json();
+                
+                if (data.error) throw new Error(data.error);
+                
+                const tbody = document.getElementById('log-body');
+                tbody.innerHTML = data.logs.map(log => {
+                    const date = new Date(log.timestamp).toLocaleString();
+                    let tagClass = 'tag-system';
+                    if (log.action.includes('CREATE')) tagClass = 'tag-create';
+                    if (log.action.includes('DELETE')) tagClass = 'tag-delete';
+                    if (log.action.includes('UPDATE') || log.action.includes('CLOSE')) tagClass = 'tag-update';
+                    if (log.action.includes('VOTE')) tagClass = 'tag-vote';
+                    
+                    return `
+                        <tr>
+                            <td style="white-space:nowrap; color: #888;">${date}</td>
+                            <td style="font-family: monospace;">${log.ip_address}</td>
+                            <td><span class="tag ${tagClass}">${log.action}</span></td>
+                            <td>${escapeHtml(log.details)}</td>
+                            <td>${log.resource_type || '-'} ${log.resource_id ? '#' + log.resource_id : ''}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                document.getElementById('log-body').innerHTML = `<tr><td colspan="5" style="color:red">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                       .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        function toggleDarkMode() {
+            document.body.classList.toggle('dark-mode');
+            localStorage.setItem('darkMode', document.body.classList.contains('dark-mode'));
+        }
+        
+        if (localStorage.getItem('darkMode') === 'true') document.body.classList.add('dark-mode');
+        
+        loadLogs();
+        // Auto-refresh every 30 seconds
+        setInterval(loadLogs, 30000);
+    </script>
+</body>
+</html>
