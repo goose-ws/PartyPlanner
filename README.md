@@ -1,204 +1,149 @@
-# D&D Session Scheduler
+# Party Planner 🎲
 
-A Docker-based scheduling application designed for D&D groups to coordinate session availability.
+A containerized D&D session scheduler designed for groups using Discord for D&D to coordinate availability without the headache.
 
 ## Features
 
-- 📅 **Campaign Management**: Create multiple campaigns with configurable recurrence patterns
-- 🔄 **Automated Poll Generation**: Automatically creates polls for upcoming sessions
-- 📊 **Availability Tracking**: Players vote Yes/If Needed/Maybe/No with weighted scoring
-- 🤖 **Discord Integration**: Automated notifications for new polls, reminders, and scheduling
-- 📱 **Mobile Friendly**: Responsive design works on all devices
-- 🔐 **Simple Auth**: Single admin password for trusted groups
-- ⏰ **Timezone Aware**: Proper timezone handling for distributed groups
+- 📅 **Campaign Management**: Create multiple campaigns with static and dynamic recurrence patterns (e.g., "Every 2 weeks").
+- 🔄 **Automated Poll Generation**: Automatically creates polls for upcoming sessions based on your schedule.
+- 📊 **Availability Tracking**: Weighted scoring system (Yes/If Needed/Maybe/No) to objectively find the best date.
+- ⚙️ **Configurable Deadlines**: Set custom "Response Warning" and "Decision" deadlines per campaign.
+- 🤖 **Discord Integration**: Automated notifications for new polls, reminders for non-responders, and final schedule announcements.
+- 📱 **Mobile Friendly**: Responsive design works on all devices.
 
-## Quick Start
+## Quick Start (Docker Compose)
 
-### Prerequisites
+The easiest way to run Party Planner is using the pre-built image from GitHub Container Registry. It depends on you already having a MariaDB/MySQL backend up and running, with a user and database for Party Planner to use.
 
-- Docker and Docker Compose installed
-- MariaDB instance (can be external or use included docker-compose)
-- Discord webhook URL (optional but recommended)
+1. **Create a `docker-compose.yml` file:**
 
-### Installation
-
-1. **Clone or create project directory**:
-```bash
-mkdir dnd-scheduler
-cd dnd-scheduler
-```
-
-2. **Create the following files** with the code provided:
-   - `Dockerfile`
-   - `requirements.txt`
-   - `app.py`
-   - `docker-compose.yml`
-   - Create a `templates/` directory with:
-     - `login.html`
-     - `admin.html`
-     - `poll.html`
-
-3. **Configure environment variables** in `docker-compose.yml`:
 ```yaml
-environment:
-  - DB_HOST=your-mariadb-host
-  - DB_USER=your-db-user
-  - DB_PASSWORD=your-db-password
-  - DB_NAME=dnd_scheduler
-  - ADMIN_PASSWORD=your-secure-password
-  - SECRET_KEY=generate-a-random-secret-key
-  - APP_URL=http://your-domain.com
-  - SESSION_TIMEOUT=24h  # How long users stay logged in
+services:
+  partyplanner:
+    image: ghcr.io/goose-ws/partyplanner:latest
+    container_name: partyplanner
+    hostname: partyplanner
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    environment:
+      DB_HOST: "mariadb"
+      DB_USER: "partyplanner"
+      DB_PASSWORD: "ChangeThisPassword"
+      DB_NAME: "partyplanner"
+      ADMIN_PASSWORD: "ChangeThisAdminPassword"
+      SECRET_KEY: "GenerateARandomStringHere"
+      APP_URL: "https://partyplanner.domain.tld"
+      SESSION_TIMEOUT: "180d"
+      TZ: "America/New_York"
+      APP_ENV: "development"
+    volumes:
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+    logging:
+      driver: json-file
+      options:
+        max-file: "1"
+        max-size: "10M"
 ```
 
-**Session Timeout Options:**
-- Format: `{number}{h|d}` where h=hours, d=days
-- Examples: `12h` (12 hours), `7d` (7 days), `180d` (6 months)
-- Default: `24h` if not specified
-
-4. **Build and run**:
+2. **Run it:**
 ```bash
-docker-compose up -d
+docker compose up -d
+
 ```
 
-5. **Access the application**:
-   - Navigate to `http://localhost:5000`
-   - Login with your configured ADMIN_PASSWORD
-   - Create your first campaign!
+3. **Access the Interface:**
+* Go to `http://localhost:5000` (or your configured domain)
+* Log in with the `ADMIN_PASSWORD` you set.
 
 ## Configuration
 
 ### Environment Variables
 
-- **DB_HOST**: MariaDB host address
-- **DB_USER**: Database user
-- **DB_PASSWORD**: Database password
-- **DB_NAME**: Database name (will be auto-created if doesn't exist)
-- **ADMIN_PASSWORD**: Password for admin panel access
-- **SECRET_KEY**: Random secret key for session security (generate with `python -c "import secrets; print(secrets.token_hex(32))"`)
-- **APP_URL**: Public URL of your application (used in Discord notification links)
-- **SESSION_TIMEOUT**: How long users stay logged in (format: `12h` or `7d`, default: `24h`)
+| Variable | Description | Default |
+| --- | --- | --- |
+| `DB_HOST` | Hostname or address for MariaDB/MySQL | `(Not set)` |
+| `DB_USER` | Username for MariaDB/MySQL | `(Not set)` |
+| `DB_PASSWORD` | Password for MariaDB/MySQL | `(Not set)` |
+| `DB_NAME` | Name of the database to use for MariaDB/MySQL | `(Not set)` |
+| `ADMIN_PASSWORD` | Password to access the admin panel | `admin123` (Unsafe) |
+| `SECRET_KEY` | Key for signing session cookies (Set to a long, random string) | `dev-secret...` (Unsafe) |
+| `APP_URL` | Public URL used in Discord links | `http://localhost:5000` |
+| `SESSION_TIMEOUT` | Login duration (e.g., `12h`, `180d`) | `24h` |
+| `TZ` | Container Timezone | `UTC` |
+| `APP_ENV` | Set to `production` to enable Secure/SameSite cookies (**Necessary if using HTTPS**) | `development` |
 
 ### Campaign Settings
 
-- **Name**: Campaign identifier
-- **Start Date**: When the campaign begins
-- **Recurrence**: Days between sessions (e.g., 14 for bi-weekly)
-- **Session Times**: Default start and end times
-- **Polls in Advance**: How many future polls to maintain (recommended: 3)
-- **Timezone**: Your local timezone
-- **Discord Webhook**: For automated notifications
-- **Players**: List of player names
+* **Schedule Type**: Dynamic (every X days) or Static (e.g., every 2nd Thursday).
+* **Deadlines**:
+* *Response Warning*: How many days before the session to ping non-responders.
+* *Decision Deadline*: How many days before the session to announce the best date.
 
-### Discord Webhook Setup
 
-1. In Discord, go to Server Settings → Integrations → Webhooks
-2. Create a new webhook for your D&D channel
-3. Copy the webhook URL
-4. Paste it into your campaign settings
+* **Discord Webhook**: The URL for the channel where the bot should post.
 
-### Automated Notifications
+## Nginx Configuration
 
-The system sends Discord notifications:
+If you are running this behind an Nginx reverse proxy (recommended for SSL), here is a standard configuration block that supports WebSockets and proper header forwarding.
 
-- **New Poll Created**: When automation generates a new poll
-- **2 Weeks Before**: Lists players who haven't responded
-- **1 Week Before**: Announces best date(s) or indicates a tie
-- **Session Scheduled**: When admin selects final date
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name partyplanner.domain.tld;
+    root /var/www/partyplanner.domain.tld;
+    access_log /var/log/nginx/partyplanner.access.log;
+    error_log /var/log/nginx/partyplanner.error.log;
+    location /.well-known/ { allow all; }
+    location / { return 301 https://partyplanner.domain.tld$request_uri; }
+}
 
-## Usage
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name partyplanner.domain.tld;
+    root /var/www/partyplanner.domain.tld;
+    access_log /var/log/nginx/partyplanner.access.log;
+    error_log /var/log/nginx/partyplanner.error.log;
+    
+    ssl_certificate /etc/letsencrypt/live/partyplanner.domain.tld/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/partyplanner.domain.tld/privkey.pem;
 
-### Creating a Campaign
+    location / {
+        # Set proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
 
-1. Click "New Campaign" in admin panel
-2. Fill in campaign details
-3. Add player names
-4. Set as active if this is your current campaign
-5. Save
+        # Important for WebSockets if needed later
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "Upgrade";
 
-### Managing Polls
+        # Docker DNS resolver (useful if container IPs change)
+        resolver 127.0.0.11 valid=30s;
+        set $upstream_app partyplanner;
+        set $upstream_port 5000;
+        set $upstream_proto http;
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+    }
 
-**Automated**: The system automatically creates polls based on your recurrence schedule
+    location /.well-known/ {
+        allow all;
+    }
+}
 
-**Manual**: Click "+ Poll" on any campaign to create additional polls
-
-### Voting
-
-1. Navigate to a poll (from admin panel or Discord link)
-2. Click any cell to cycle through: Yes → If Needed → Maybe → No
-3. Responses auto-save and scores update in real-time
-
-### Closing Polls
-
-1. Review the best-scored dates (highlighted in green)
-2. Click "Select Date & Close Poll"
-3. Choose the final date
-4. System sends Discord announcement and closes poll
+```
 
 ## Scoring System
 
-- **Yes**: +3 points
-- **If Needed**: +2 points
-- **Maybe**: +1 point
-- **No**: 0 points
+To help DMs make decisions, votes are weighted:
 
-The date(s) with the highest total score are highlighted as best options.
-
-## Database
-
-The application automatically creates the necessary database tables on first run:
-
-- `campaigns`: Campaign configurations
-- `players`: Player names per campaign
-- `polls`: Individual polls with date ranges
-- `responses`: Player availability responses
-
-## Nginx Reverse Proxy
-
-To use with Nginx, add this to your config:
-
-```nginx
-location /scheduler/ {
-    proxy_pass http://localhost:5000/;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-}
-```
-
-Update `APP_URL` environment variable to match your public URL.
-
-## Troubleshooting
-
-**Can't connect to database**: 
-- Verify DB_HOST, DB_USER, DB_PASSWORD, and DB_NAME are correct
-- Ensure MariaDB is accessible from the container
-
-**Notifications not sending**:
-- Verify Discord webhook URL is correct
-- Check that APP_URL is set properly
-- Review Docker logs: `docker logs dnd-scheduler`
-
-**Polls not auto-creating**:
-- Check that campaign is marked as "Active"
-- Verify the scheduler is running (check logs)
-- Ensure start date and recurrence are set correctly
-
-## Technical Details
-
-- **Backend**: Python Flask
-- **Database**: MariaDB (MySQL compatible)
-- **Scheduler**: APScheduler for background jobs
-- **Frontend**: Vanilla JavaScript, responsive CSS
-
-## License
-
-This is a personal project. Feel free to use and modify as needed.
-
-## Support
-
-For issues or questions, check the application logs:
-```bash
-docker logs dnd-scheduler
-```
+* **Yes**: +3 points
+* **If Needed**: +2 points
+* **Maybe**: +1 point
+* **No**: 0 points (and zeroes the weight for that date if the user is the DM)

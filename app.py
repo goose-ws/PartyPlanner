@@ -5,6 +5,7 @@ import re
 import time
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, abort
+from flask_wtf.csrf import CSRFProtect
 import mysql.connector
 from mysql.connector import pooling
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -21,6 +22,17 @@ if os.environ.get('ADMIN_PASSWORD') is None:
     print("WARNING: ADMIN_PASSWORD not set. Default password 'admin123' is active.")
 
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# Initialize CSRF Protection
+csrf = CSRFProtect(app)
+
+# Security Headers (Add these config updates)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    # Set to True ONLY if you are running on HTTPS. If testing on HTTP localhost, keep False.
+    SESSION_COOKIE_SECURE=os.environ.get('APP_ENV') == 'production'
+)
 
 # Parse session timeout from environment variable
 def parse_session_timeout(timeout_str):
@@ -79,8 +91,15 @@ def get_db():
         abort(503, description="Database temporarily unavailable. Please try again.")
 
 def init_db():
-    conn = get_db()
-    if not conn:
+    # Check if pool exists first
+    if not connection_pool:
+        print("Database pool not initialized. Skipping DB init.")
+        return
+
+    try:
+        conn = connection_pool.get_connection()
+    except Exception as e:
+        print(f"Skipping DB init: Could not connect to database: {e}")
         return
     
     cursor = conn.cursor()
@@ -119,10 +138,35 @@ def init_db():
     # Migration: Check for is_dm column
     try:
         cursor.execute("SELECT is_dm FROM players LIMIT 1")
-        cursor.fetchall()  # <--- THIS LINE WAS MISSING. It clears the buffer.
+        cursor.fetchall()
     except Exception:
         print("Migrating database: Adding is_dm column to players table...")
-        cursor.execute("ALTER TABLE players ADD COLUMN is_dm BOOLEAN DEFAULT FALSE")
+        try:
+            cursor.execute("ALTER TABLE players ADD COLUMN is_dm BOOLEAN DEFAULT FALSE")
+        except mysql.connector.Error as err:
+            if err.errno != 1060: # 1060 = Duplicate column name
+                raise err
+        
+    # Migration: Deadlines
+    try:
+        cursor.execute("SELECT deadline_respond FROM campaigns LIMIT 1")
+        cursor.fetchall()
+    except Exception:
+        print("Migrating database: Adding deadline columns to campaigns table...")
+        try:
+            # We wrap these in a try/except to handle the race condition
+            # where another worker might add the column while we are checking.
+            cursor.execute("ALTER TABLE campaigns ADD COLUMN deadline_respond INT DEFAULT 14")
+            cursor.execute("ALTER TABLE campaigns ADD COLUMN deadline_decide INT DEFAULT 7")
+        except mysql.connector.Error as err:
+            # Error 1060 means "Duplicate column name".
+            # If we get this, it means another worker finished the migration first.
+            # We can safely ignore it and continue.
+            if err.errno == 1060:
+                print("Migration race condition handled: Columns already exist.")
+            else:
+                # If it's any other error, we actually want to crash so we know about it.
+                raise err
     
     # Polls table
     cursor.execute('''
@@ -276,8 +320,8 @@ def create_campaign():
     cursor.execute('''
         INSERT INTO campaigns (name, is_active, start_date, schedule_type, recurrence_days, 
                              weekday, session_time_start, session_time_end, polls_in_advance,
-                             timezone, discord_webhook)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                             timezone, discord_webhook, deadline_respond, deadline_decide)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     ''', (
         data['name'],
         data.get('is_active', False),
@@ -289,7 +333,9 @@ def create_campaign():
         data['session_time_end'],
         data.get('polls_in_advance', 3),
         data.get('timezone', 'UTC'),
-        data.get('discord_webhook', '')
+        data.get('discord_webhook', ''),
+        data.get('deadline_respond', 14),
+        data.get('deadline_decide', 7)
     ))
     
     campaign_id = cursor.lastrowid
@@ -333,7 +379,7 @@ def update_campaign(campaign_id):
         SET name = %s, is_active = %s, start_date = %s, schedule_type = %s, 
             recurrence_days = %s, weekday = %s, session_time_start = %s, 
             session_time_end = %s, polls_in_advance = %s, timezone = %s, 
-            discord_webhook = %s
+            discord_webhook = %s, deadline_respond = %s, deadline_decide = %s
         WHERE id = %s
     ''', (
         data['name'],
@@ -347,11 +393,14 @@ def update_campaign(campaign_id):
         data.get('polls_in_advance', 3),
         data.get('timezone', 'UTC'),
         data.get('discord_webhook', ''),
+        data.get('deadline_respond', 14),
+        data.get('deadline_decide', 7),
         campaign_id
     ))
     
-    # Add players (This works for both create_campaign and update_campaign)
+    # Update players
     if 'players' in data:
+        provided_names = []
         for player in data['players']:
             # Handle both string (legacy) and dict (new) inputs
             if isinstance(player, dict):
@@ -361,8 +410,23 @@ def update_campaign(campaign_id):
                 name = player
                 is_dm = False
                 
-            cursor.execute('INSERT INTO players (campaign_id, name, is_dm) VALUES (%s, %s, %s)', 
-                         (campaign_id, name, is_dm))
+            provided_names.append(name)
+                
+            # FIX: Use ON DUPLICATE KEY UPDATE to update existing players instead of crashing
+            cursor.execute('''
+                INSERT INTO players (campaign_id, name, is_dm) 
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE is_dm = VALUES(is_dm)
+            ''', (campaign_id, name, is_dm))
+            
+        # Handle deletions: Remove players that are no longer in the list
+        if provided_names:
+            placeholders = ', '.join(['%s'] * len(provided_names))
+            sql = f"DELETE FROM players WHERE campaign_id = %s AND name NOT IN ({placeholders})"
+            cursor.execute(sql, [campaign_id] + provided_names)
+        else:
+            # If the list was explicitly cleared
+            cursor.execute("DELETE FROM players WHERE campaign_id = %s", (campaign_id,))
     
     conn.commit()
     cursor.close()
@@ -1112,9 +1176,11 @@ def check_notifications():
     cursor = conn.cursor(dictionary=True)
     
     # Get all open polls with their campaigns
+    # Get all open polls with their campaigns
     cursor.execute('''
         SELECT p.*, c.name as campaign_name, c.discord_webhook, c.timezone,
-               c.session_time_start, c.session_time_end
+               c.session_time_start, c.session_time_end,
+               c.deadline_respond, c.deadline_decide
         FROM polls p
         JOIN campaigns c ON p.campaign_id = c.id
         WHERE p.is_closed = FALSE AND c.discord_webhook IS NOT NULL AND c.discord_webhook != ''
@@ -1125,11 +1191,15 @@ def check_notifications():
         tz = pytz.timezone(poll['timezone'])
         now = datetime.now(tz).date()
         
-        two_weeks_before = poll['start_date'] - timedelta(days=14)
-        one_week_before = poll['start_date'] - timedelta(days=7)
+        # USE CONFIGURABLE DEADLINES
+        respond_days = poll.get('deadline_respond', 14)
+        decide_days = poll.get('deadline_decide', 7)
         
-        # Two week notification
-        if now >= two_weeks_before and not poll['notified_two_weeks']:
+        deadline_respond_date = poll['start_date'] - timedelta(days=respond_days)
+        deadline_decide_date = poll['start_date'] - timedelta(days=decide_days)
+        
+        # Respond Notification
+        if now >= deadline_respond_date and not poll['notified_two_weeks']:
             # Get players who haven't responded
             cursor.execute('''
                 SELECT pl.name FROM players pl
@@ -1152,7 +1222,7 @@ def check_notifications():
             cursor.execute('UPDATE polls SET notified_two_weeks = TRUE WHERE id = %s', (poll['id'],))
         
         # One week notification
-        if now >= one_week_before and not poll['notified_one_week']:
+        if now >= deadline_decide_date and not poll['notified_one_week']:
             # Calculate best dates
             cursor.execute('''
                 SELECT response_date, 
@@ -1213,6 +1283,9 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(check_and_create_polls, CronTrigger(hour=0, minute=0))  # Daily at midnight
 scheduler.add_job(check_notifications, CronTrigger(hour='*/6'))  # Every 6 hours
 scheduler.start()
+
+# Run DB initialization on module import (handles Gunicorn startup)
+init_db()
 
 if __name__ == '__main__':
     init_db()

@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>D&D Scheduler - Admin Panel</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>Party Planner - Admin Panel</title>
     <style>
         * {
             margin: 0;
@@ -415,6 +416,18 @@
                     <label>Recurrence (days between sessions)</label>
                     <input type="number" id="campaign-recurrence" min="1" value="14" required>
                 </div>
+                <div style="display: flex; gap: 15px;">
+                    <div class="form-group" style="flex: 1;">
+                        <label>Response Warning (Days Before)</label>
+                        <input type="number" id="campaign-deadline-respond" min="1" value="14" required>
+                        <small style="color: #666;">When to tag non-responders</small>
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label>Decision Deadline (Days Before)</label>
+                        <input type="number" id="campaign-deadline-decide" min="1" value="7" required>
+                        <small style="color: #666;">When to announce best dates</small>
+                    </div>
+                </div>
                 
                 <div class="form-group" id="static-fields" style="display: none;">
                     <label>Day of Week</label>
@@ -517,6 +530,18 @@
         let currentCampaignId = null;
         let players = [];
         
+        function escapeHtml(text) {
+            if (!text) return text;
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        
         async function loadCampaigns() {
             const response = await fetch('/api/campaigns');
             campaigns = await response.json();
@@ -531,11 +556,12 @@
                 const card = document.createElement('div');
                 card.className = `campaign-card ${campaign.is_active ? 'active' : ''}`;
                 
+                // SECURITY UPDATE: escapeHtml() added to name
                 card.innerHTML = `
                     <span class="campaign-badge ${campaign.is_active ? 'badge-active' : 'badge-inactive'}">
                         ${campaign.is_active ? 'ACTIVE' : 'Inactive'}
                     </span>
-                    <div class="campaign-name">${campaign.name}</div>
+                    <div class="campaign-name">${escapeHtml(campaign.name)}</div>
                     <div class="campaign-info">👥 ${campaign.player_count} players</div>
                     <div class="campaign-info">📊 ${campaign.active_polls} active polls</div>
                     <div class="campaign-info">📅 Every ${campaign.recurrence_days} days</div>
@@ -550,7 +576,7 @@
                             `<button class="btn btn-secondary" onclick="endCampaign(${campaign.id})">🏁 End Campaign</button>` : 
                             `<button class="btn btn-primary" onclick="resumeCampaign(${campaign.id})">▶️ Resume Campaign</button>`
                         }
-                        <button class="btn btn-danger" onclick="deleteCampaign(${campaign.id})">🗑️</button>
+                        <button class="btn btn-danger" onclick="deleteCampaign(${campaign.id})">🗑️ Delete Campaign</button>
                     </div>
                 `;
                 
@@ -567,6 +593,8 @@
             document.getElementById('campaign-schedule-type').value = 'dynamic';
             toggleScheduleFields();
             document.getElementById('campaign-modal').style.display = 'block';
+            document.getElementById('campaign-deadline-respond').value = 14;
+            document.getElementById('campaign-deadline-decide').value = 7;
         }
         
         function toggleScheduleFields() {
@@ -612,7 +640,8 @@
             document.getElementById('campaign-time-end').value = campaign.session_time_end;
             document.getElementById('campaign-polls-advance').value = campaign.polls_in_advance;
             document.getElementById('campaign-timezone').value = campaign.timezone;
-            document.getElementById('campaign-webhook').value = campaign.discord_webhook || '';
+            document.getElementById('campaign-deadline-respond').value = campaign.deadline_respond || 14;
+            document.getElementById('campaign-deadline-decide').value = campaign.deadline_decide || 7;
             
             // Load players for this campaign
             const response = await fetch(`/api/campaigns/${id}/players`);
@@ -656,12 +685,12 @@
             players.forEach(player => {
                 const tag = document.createElement('div');
                 tag.className = 'player-tag';
-                // Add a DM badge visually if they are the DM
                 const dmBadge = player.is_dm ? '<span style="background:#ff9800; color:white; padding:2px 6px; border-radius:10px; font-size:10px; margin-right:5px;">DM</span>' : '';
                 
+                // SECURITY UPDATE: escapeHtml() added to name
                 tag.innerHTML = `
-                    ${dmBadge}${player.name}
-                    <span class="remove" onclick="removePlayer('${player.name}')">×</span>
+                    ${dmBadge}${escapeHtml(player.name)}
+                    <span class="remove" onclick="removePlayer('${escapeHtml(player.name).replace(/'/g, "\\'")}')">×</span>
                 `;
                 list.appendChild(tag);
             });
@@ -670,6 +699,10 @@
         document.getElementById('campaign-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            // ... (keep variable gathering logic: scheduleType, recurrenceDays, data object) ...
+            // Note: Copy the variable gathering logic from your existing file, 
+            // we are just updating the fetch call below:
+
             const scheduleType = document.getElementById('campaign-schedule-type').value;
             let recurrenceDays, weekday = null;
             
@@ -692,9 +725,11 @@
                 polls_in_advance: parseInt(document.getElementById('campaign-polls-advance').value),
                 timezone: document.getElementById('campaign-timezone').value,
                 discord_webhook: document.getElementById('campaign-webhook').value,
+                deadline_respond: parseInt(document.getElementById('campaign-deadline-respond').value),
+                deadline_decide: parseInt(document.getElementById('campaign-deadline-decide').value),
                 players: players
             };
-            
+
             const url = currentCampaignId 
                 ? `/api/campaigns/${currentCampaignId}`
                 : '/api/campaigns';
@@ -703,7 +738,10 @@
             
             await fetch(url, {
                 method: method,
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken // <--- Added Header
+                },
                 body: JSON.stringify(data)
             });
             
@@ -716,7 +754,10 @@
                 return;
             }
             
-            await fetch(`/api/campaigns/${id}`, { method: 'DELETE' });
+            await fetch(`/api/campaigns/${id}`, { 
+                method: 'DELETE',
+                headers: { 'X-CSRFToken': csrfToken } // <--- Added Header
+            });
             loadCampaigns();
         }
         
@@ -751,20 +792,19 @@
         }
         
         async function endCampaignAction(id, action) {
-            // Close the modal
             document.querySelector('.modal').remove();
-            
-            // Deactivate the campaign
             const campaign = campaigns.find(c => c.id === id);
-            campaign.is_active = false;
-            
             const response = await fetch(`/api/campaigns/${id}/players`);
             const data = await response.json();
             
             await fetch(`/api/campaigns/${id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken // <--- Added Header
+                },
                 body: JSON.stringify({
+                    // ... (keep existing body params) ...
                     name: campaign.name,
                     is_active: false,
                     start_date: campaign.start_date,
@@ -778,17 +818,18 @@
                 })
             });
             
-            // Delete open polls if requested
             if (action === 'delete') {
                 const pollsResponse = await fetch('/api/polls/all');
                 const pollsData = await pollsResponse.json();
                 const openPolls = pollsData.polls.filter(p => p.campaign_id === id && !p.is_closed);
                 
                 for (const poll of openPolls) {
-                    await fetch(`/api/polls/${poll.slug}`, { method: 'DELETE' });
+                    await fetch(`/api/polls/${poll.slug}`, { 
+                        method: 'DELETE',
+                        headers: { 'X-CSRFToken': csrfToken } // <--- Added Header
+                    });
                 }
             }
-            
             loadCampaigns();
         }
         
@@ -796,15 +837,18 @@
             if (!confirm('Resume this campaign? This will deactivate any other active campaigns and start generating new polls.')) {
                 return;
             }
-            
             const campaign = campaigns.find(c => c.id === id);
             const response = await fetch(`/api/campaigns/${id}/players`);
             const data = await response.json();
             
             await fetch(`/api/campaigns/${id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken // <--- Added Header
+                },
                 body: JSON.stringify({
+                    // ... (keep existing body params) ...
                     name: campaign.name,
                     is_active: true,
                     start_date: campaign.start_date,
@@ -817,7 +861,6 @@
                     players: data.players
                 })
             });
-            
             loadCampaigns();
         }
         
@@ -833,7 +876,6 @@
         
         document.getElementById('poll-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
             const data = {
                 campaign_id: parseInt(document.getElementById('poll-campaign-id').value),
                 start_date: document.getElementById('poll-start-date').value,
@@ -844,7 +886,10 @@
             
             await fetch('/api/polls', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken // <--- Added Header
+                },
                 body: JSON.stringify(data)
             });
             
@@ -1125,59 +1170,29 @@
         }
         
         async function deletePollFromList(slug) {
-            console.log('deletePollFromList called with slug:', slug);
-            
-            if (!confirm('Are you sure you want to delete this poll?')) {
-                console.log('User cancelled deletion');
-                return;
-            }
-            
-            console.log('Sending DELETE request for slug:', slug);
+            if (!confirm('Are you sure you want to delete this poll?')) { return; }
             
             try {
-                const response = await fetch(`/api/polls/${slug}`, { method: 'DELETE' });
-                console.log('Delete response status:', response.status);
-                const result = await response.json();
-                console.log('Delete response:', result);
+                await fetch(`/api/polls/${slug}`, { 
+                    method: 'DELETE',
+                    headers: { 'X-CSRFToken': csrfToken } // <--- Added Header
+                });
                 
-                // Refresh campaigns list to update counts
-                console.log('Refreshing campaigns list...');
                 await loadCampaigns();
-                
-                // Refresh the current view
+                // ... (keep existing refresh logic) ...
                 if (document.getElementById('all-polls-view').style.display === 'block') {
-                    console.log('all-polls-view is visible, determining which view to refresh...');
-                    
-                    // Check if we're in the "All Polls" view or a campaign-specific view
+                     // We're in campaign-specific view, extract campaign ID
                     const header = document.querySelector('#all-polls-content h3');
-                    console.log('Header element:', header);
-                    console.log('Header text:', header ? header.textContent : 'null');
-                    
                     if (header && header.textContent.includes(' - Campaign Polls')) {
-                        console.log('In campaign-specific view');
-                        // We're in campaign-specific view, extract campaign ID
-                        // Find the campaign by matching the name in the header
                         const campaignName = header.textContent.split(' - Campaign Polls')[0];
-                        console.log('Campaign name:', campaignName);
                         const campaign = campaigns.find(c => c.name === campaignName);
-                        console.log('Found campaign:', campaign);
-                        
                         if (campaign) {
-                            console.log('Refreshing campaign polls for ID:', campaign.id);
                             showCampaignPolls(campaign.id);
-                        } else {
-                            console.error('Could not find campaign with name:', campaignName);
                         }
                     } else {
-                        console.log('In global All Polls view, refreshing...');
-                        // We're in the global "All Polls" view
                         showAllPolls();
                     }
-                } else {
-                    console.log('all-polls-view is not visible');
                 }
-                
-                console.log('Delete operation completed');
             } catch (error) {
                 console.error('Error during delete operation:', error);
             }

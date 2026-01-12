@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>D&D Scheduler - Poll</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>Party Planner - Poll</title>
     <style>
         * {
             margin: 0;
@@ -408,6 +409,18 @@
         const pollSlug = '{{ poll_slug }}';
         let pollData = null;
         
+        function escapeHtml(text) {
+            if (!text) return text;
+            return text
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+        
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        
         async function loadPoll() {
             const response = await fetch(`/api/polls/${pollSlug}`);
             pollData = await response.json();
@@ -417,8 +430,9 @@
         function renderPoll() {
             const poll = pollData.poll;
             
+            // SECURITY UPDATE: escapeHtml added
             document.getElementById('poll-title').textContent = 
-                `${poll.campaign_name} - Session ${poll.session_number}`;
+                `${escapeHtml(poll.campaign_name)} - Session ${poll.session_number}`;
             
             const pollInfo = document.getElementById('poll-info');
             let statusHtml = '';
@@ -431,10 +445,11 @@
                 }
             }
             
+            // SECURITY UPDATE: escapeHtml added to timezone
             pollInfo.innerHTML = `
                 <h2>Session ${poll.session_number}</h2>
                 <div class="info-row">📅 Poll Period: ${poll.start_date} to ${poll.end_date}</div>
-                <div class="info-row">🕐 Session Time: ${poll.session_time_start} - ${poll.session_time_end} (${poll.timezone})</div>
+                <div class="info-row">🕐 Session Time: ${poll.session_time_start} - ${poll.session_time_end} (${escapeHtml(poll.timezone)})</div>
                 ${statusHtml}
             `;
             
@@ -461,23 +476,21 @@
             // Render table body
             const body = document.getElementById('table-body');
             body.innerHTML = pollData.players.map(player => {
-                // Check if this player is the DM
                 const dmBadge = player.is_dm 
                     ? '<span title="Dungeon Master" style="cursor:help; margin-left:5px;">👑</span>' 
                     : '';
                 
+                // SECURITY UPDATE: escapeHtml added to player name
                 return `
                     <tr>
                         <td style="font-weight: 600;">
-                            ${player.name} ${dmBadge}
+                            ${escapeHtml(player.name)} ${dmBadge}
                         </td>
                         ${pollData.dates.map(date => {
-                            // ... existing code for cells ...
                             const response = pollData.responses.find(r => 
                                 r.player_id === player.id && r.response_date === date
                             );
                             const availability = response ? response.availability : 'none';
-                            // ... existing code ...
                             const text = {
                                 'yes': '✅ Yes',
                                 'if_needed': '🟡 If Needed',
@@ -498,14 +511,19 @@
                 `;
             }).join('');
             
-            // Render admin controls
+            // ... (rest of function remains the same, controls usually don't need escaping) ...
+            // Note: Just ensure the closing brace } matches the function start.
+            // The "admin-controls" section is safe because it uses hardcoded strings mostly.
+            
+            // Render admin controls (abbreviated for the block, keep your original logic here)
             const controls = document.getElementById('admin-controls');
             if (!poll.is_closed) {
+                // ...
                 const maxScore = Math.max(...Object.values(pollData.date_scores));
                 const bestDates = Object.entries(pollData.date_scores)
                     .filter(([_, score]) => score === maxScore && score > 0)
                     .map(([date, _]) => date);
-                
+
                 controls.innerHTML = `
                     <button class="btn btn-primary" onclick="showSelectDateModal()">
                         📅 Select Date & Close
@@ -549,10 +567,12 @@
                 return;
             }
             
-            // Send null as the selected_date
             await fetch(`/api/polls/${pollSlug}/close`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken // <--- Added Header
+                },
                 body: JSON.stringify({ selected_date: null })
             });
             
@@ -571,10 +591,12 @@
             const newAvailability = currentIndex === -1 ? 'yes' : options[nextIndex];
             
             if (newAvailability === 'clear') {
-                // Delete the response
                 await fetch('/api/responses/delete', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken // <--- Added Header
+                    },
                     body: JSON.stringify({
                         poll_id: pollData.poll.id,
                         player_id: playerId,
@@ -582,10 +604,12 @@
                     })
                 });
             } else {
-                // Save the response
                 await fetch('/api/responses', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken // <--- Added Header
+                    },
                     body: JSON.stringify({
                         poll_id: pollData.poll.id,
                         player_id: playerId,
@@ -623,12 +647,14 @@
         
         document.getElementById('select-date-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
             const selectedDate = document.getElementById('date-select').value;
             
             await fetch(`/api/polls/${pollSlug}/close`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken // <--- Added Header
+                },
                 body: JSON.stringify({ selected_date: selectedDate })
             });
             
@@ -637,22 +663,24 @@
         });
         
         async function deletePoll() {
-            if (!confirm('Are you sure you want to delete this poll?')) {
-                return;
-            }
+            if (!confirm('Are you sure you want to delete this poll?')) { return; }
             
-            await fetch(`/api/polls/${pollSlug}`, { method: 'DELETE' });
+            await fetch(`/api/polls/${pollSlug}`, { 
+                method: 'DELETE',
+                headers: { 'X-CSRFToken': csrfToken } // <--- Added Header
+            });
             window.location.href = '/admin';
         }
         
         async function reopenPoll() {
-            if (!confirm('Are you sure you want to reopen this poll? This will clear the selected date.')) {
-                return;
-            }
+            if (!confirm('Are you sure you want to reopen this poll? This will clear the selected date.')) { return; }
             
             await fetch(`/api/polls/${pollSlug}/reopen`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken // <--- Added Header
+                }
             });
             
             loadPoll();
