@@ -4,7 +4,7 @@ import secrets
 import re
 import time
 from datetime import datetime, timedelta
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, abort
 import mysql.connector
 from mysql.connector import pooling
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -14,6 +14,12 @@ import pytz
 from functools import wraps
 
 app = Flask(__name__)
+if os.environ.get('SECRET_KEY') is None:
+    print("WARNING: SECRET_KEY not set. Using insecure default for sessions.")
+    
+if os.environ.get('ADMIN_PASSWORD') is None:
+    print("WARNING: ADMIN_PASSWORD not set. Default password 'admin123' is active.")
+
 app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
 
 # Parse session timeout from environment variable
@@ -60,9 +66,17 @@ except Exception as e:
     connection_pool = None
 
 def get_db():
-    if connection_pool:
+    if not connection_pool:
+        # If the pool failed to initialize at startup
+        print("Error: Database connection pool is not initialized.")
+        abort(503, description="Database configuration error. Please check logs.")
+    
+    try:
         return connection_pool.get_connection()
-    return None
+    except Exception as e:
+        # If the pool is exhausted or DB is temporarily unreachable
+        print(f"Error getting connection from pool: {e}")
+        abort(503, description="Database temporarily unavailable. Please try again.")
 
 def init_db():
     conn = get_db()
