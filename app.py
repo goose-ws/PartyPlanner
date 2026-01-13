@@ -71,33 +71,46 @@ DB_CONFIG = {
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
 
 # Create connection pool
-try:
-    connection_pool = pooling.MySQLConnectionPool(**DB_CONFIG)
-except Exception as e:
-    print(f"Error creating connection pool: {e}")
-    connection_pool = None
+# Initialize to None globally
+connection_pool = None
+def get_db_pool():
+    """Lazily initialize the connection pool if it doesn't exist"""
+    global connection_pool
+    if connection_pool:
+        return connection_pool
+        
+    try:
+        print("Attempting to initialize database connection pool...")
+        connection_pool = pooling.MySQLConnectionPool(**DB_CONFIG)
+        return connection_pool
+    except Exception as e:
+        print(f"Error creating connection pool: {e}")
+        return None
 
 def get_db():
-    if not connection_pool:
-        # If the pool failed to initialize at startup
-        print("Error: Database connection pool is not initialized.")
-        abort(503, description="Database configuration error. Please check logs.")
+    # Try to get or create the pool
+    pool = get_db_pool()
+    
+    if not pool:
+        print("Error: Database connection pool could not be initialized.")
+        abort(503, description="Database unavailable. Please try again later.")
     
     try:
-        return connection_pool.get_connection()
+        return pool.get_connection()
     except Exception as e:
-        # If the pool is exhausted or DB is temporarily unreachable
         print(f"Error getting connection from pool: {e}")
         abort(503, description="Database temporarily unavailable. Please try again.")
 
 def init_db():
-    # Check if pool exists first
-    if not connection_pool:
+    # Use the helper to try and get the pool
+    pool = get_db_pool()
+    
+    if not pool:
         print("Database pool not initialized. Skipping DB init.")
         return
 
     try:
-        conn = connection_pool.get_connection()
+        conn = pool.get_connection()
     except Exception as e:
         print(f"Skipping DB init: Could not connect to database: {e}")
         return
