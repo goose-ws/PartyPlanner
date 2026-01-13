@@ -65,7 +65,9 @@ DB_CONFIG = {
     'password': os.environ.get('DB_PASSWORD', ''),
     'database': os.environ.get('DB_NAME', 'dnd_scheduler'),
     'pool_name': 'mypool',
-    'pool_size': 5
+    'pool_size': 5,
+    'use_pure': True,
+    'charset': 'utf8mb4'
 }
 
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
@@ -281,6 +283,11 @@ def login():
 def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
+    
+# Close DB connection automatically at the end of every request
+@app.teardown_appcontext
+def close_db_connection(exception):
+    pass
 
 @app.route('/admin')
 @login_required
@@ -1415,9 +1422,6 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(check_and_create_polls, CronTrigger(hour=0, minute=0))  # Daily at midnight
 scheduler.add_job(check_notifications, CronTrigger(hour='*/6'))  # Every 6 hours
 scheduler.start()
-
-# Run DB initialization on module import (handles Gunicorn startup)
-init_db()
 
 if __name__ == '__main__':
     init_db()
