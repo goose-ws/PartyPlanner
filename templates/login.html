@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎲</text></svg>">
     <title>Party Planner - Login</title>
     <style>
         * {
@@ -131,12 +132,14 @@
             
             const password = document.getElementById('password').value;
             const errorDiv = document.getElementById('error-message');
+            const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
             
             try {
                 const response = await fetch('/login', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
                     },
                     body: JSON.stringify({ password })
                 });
@@ -144,13 +147,13 @@
                 const data = await response.json();
                 
                 if (data.success) {
-                    // Redirect to the original URL or admin panel
                     window.location.href = data.redirect || '/admin';
                 } else {
                     errorDiv.textContent = 'Invalid password';
                     errorDiv.style.display = 'block';
                 }
             } catch (error) {
+                console.error("Login error:", error); // Helpful for debugging
                 errorDiv.textContent = 'An error occurred. Please try again.';
                 errorDiv.style.display = 'block';
             }
