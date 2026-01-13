@@ -10,11 +10,14 @@ import mysql.connector
 from mysql.connector import pooling
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from werkzeug.middleware.proxy_fix import ProxyFix
 import requests
 import pytz
 from functools import wraps
 
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+
 if os.environ.get('SECRET_KEY') is None:
     print("WARNING: SECRET_KEY not set. Using insecure default for sessions.")
     
@@ -308,23 +311,20 @@ def log_audit(action, details=None, resource_type=None, resource_id=None):
         cursor = conn.cursor()
         
         # Determine IP Address
-        ip_address = "System"
+        ipAddress = "System"
         try:
             # Check if we are in a Flask request context
             if request:
-                # Trust X-Forwarded-For because you use Nginx
-                if request.headers.get('X-Forwarded-For'):
-                    ip_address = request.headers.get('X-Forwarded-For').split(',')[0]
-                else:
-                    ip_address = request.remote_addr
+                # ProxyFix automatically updates remote_addr to the real client IP
+                ipAddress = request.remote_addr 
         except RuntimeError:
-            # We are in a background job (scheduler), no request context exists
+            # Background job (scheduler), no request context
             pass
 
         cursor.execute('''
             INSERT INTO audit_log (ip_address, action, details, resource_type, resource_id)
             VALUES (%s, %s, %s, %s, %s)
-        ''', (ip_address, action, details, resource_type, resource_id))
+        ''', (ipAddress, action, details, resource_type, resource_id))
         
         conn.commit()
         cursor.close()
