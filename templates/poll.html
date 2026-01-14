@@ -36,6 +36,34 @@
             color: #333;
             font-size: 28px;
         }
+
+        .lock-toggle {
+            cursor: pointer;
+            margin-right: 8px;
+            font-size: 1.2em;
+            user-select: none;
+            transition: transform 0.2s;
+        }
+
+        .lock-toggle:hover {
+            transform: scale(1.2);
+        }
+
+        /* Visual style for a locked row */
+        .player-row.locked {
+            opacity: 0.6; /* Dims the row to indicate it is inactive */
+        }
+
+        /* Disable clicks ONLY on the availability cells when locked */
+        .player-row.locked .clickable {
+            pointer-events: none; /* Prevents clicking the date cells */
+            cursor: default;
+        }
+
+        /* Ensure the lock icon itself remains clickable */
+        .player-row.locked .player-name-cell {
+            pointer-events: auto;
+        }
         
         .poll-container {
             background: white;
@@ -481,10 +509,11 @@
                     ? '<span title="Dungeon Master" style="cursor:help; margin-left:5px;">👑</span>' 
                     : '';
                 
-                // SECURITY UPDATE: escapeHtml added to player name
+                // CHANGE: Added 'player-row locked' class and the Lock Toggle Span
                 return `
-                    <tr>
-                        <td style="font-weight: 600;">
+                    <tr class="player-row locked">
+                        <td class="player-name-cell" style="font-weight: 600;">
+                            <span class="lock-toggle" onclick="toggleRowLock(this)" title="Click to unlock row">🔒</span>
                             ${escapeHtml(player.name)} ${dmBadge}
                         </td>
                         ${pollData.dates.map(date => {
@@ -717,6 +746,31 @@
         }
         // Initialize button text on load
         updateDarkModeButton(savedDarkMode);
+        
+        function toggleRowLock(element) {
+            // Find the parent <tr> element
+            const row = element.closest('tr');
+            
+            // Check if it's currently locked
+            const isLocked = row.classList.contains('locked');
+            
+            if (isLocked) {
+                // UNLOCK ACTION
+                row.classList.remove('locked');
+                element.textContent = '🔓'; // Change to open lock
+                element.title = "Click to lock row";
+                
+                // Optional: visual feedback
+                row.style.transition = "opacity 0.3s";
+                row.style.opacity = "1"; 
+            } else {
+                // LOCK ACTION
+                row.classList.add('locked');
+                element.textContent = '🔒'; // Change to closed lock
+                element.title = "Click to unlock row";
+                row.style.opacity = ""; // Return to CSS defined opacity
+            }
+        }
     </script>
 </body>
 </html>
