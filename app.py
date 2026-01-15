@@ -1339,14 +1339,27 @@ def check_notifications():
         
         # Respond Notification
         if now >= deadline_respond_date and not poll['notified_two_weeks']:
-            # Get players who haven't responded
+            # Calculate the total number of days in this poll
+            start_date = poll['start_date']
+            end_date = poll['end_date']
+            
+            # Safety check: ensure we have date objects (MySQL Connector usually returns datetime.date)
+            if isinstance(start_date, str):
+                start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            if isinstance(end_date, str):
+                end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+                
+            total_days_in_poll = (end_date - start_date).days + 1
+
+            # Get players who haven't responded to ALL days (Response Count < Total Days)
             cursor.execute('''
-                SELECT pl.name FROM players pl
+                SELECT pl.name 
+                FROM players pl
+                LEFT JOIN responses r ON pl.id = r.player_id AND r.poll_id = %s
                 WHERE pl.campaign_id = %s
-                AND pl.id NOT IN (
-                    SELECT DISTINCT player_id FROM responses WHERE poll_id = %s
-                )
-            ''', (poll['campaign_id'], poll['id']))
+                GROUP BY pl.id
+                HAVING COUNT(r.id) < %s
+            ''', (poll['id'], poll['campaign_id'], total_days_in_poll))
             
             non_responders = [row['name'] for row in cursor.fetchall()]
             
