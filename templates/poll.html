@@ -65,11 +65,11 @@
             pointer-events: auto;
         }
         
-        /* --- Custom Ranking Dropdown Styles --- */
+        /* --- Custom Ranking Widget Styles --- */
         .ranking-dropdown {
             position: relative;
             flex: 1;
-            min-width: 220px;
+            min-width: 250px;
         }
 
         .ranking-trigger {
@@ -85,7 +85,6 @@
             user-select: none;
             border: 1px solid #c8e6c9;
             transition: all 0.2s ease;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         }
 
         .ranking-trigger:hover {
@@ -97,81 +96,96 @@
         .ranking-menu {
             display: none;
             position: absolute;
-            bottom: 110%; /* Floats ABOVE the button so it doesn't get cut off */
+            bottom: 110%;
             left: 0;
             width: 100%;
             background: white;
             border: 1px solid #e0e0e0;
             border-radius: 12px;
             box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-            max-height: 300px;
+            max-height: 350px;
             overflow-y: auto;
             z-index: 1000;
-            opacity: 0;
-            transform: translateY(10px);
-            transition: opacity 0.2s, transform 0.2s;
+            padding: 5px 0;
         }
 
         .ranking-menu.show {
             display: block;
-            opacity: 1;
-            transform: translateY(0);
+            animation: slideUp 0.2s ease-out;
         }
 
-        .ranking-item {
-            padding: 12px 15px;
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* The Row Container (Score on left, Dates on right) */
+        .ranking-row {
+            padding: 10px 15px;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: pointer;
+            align-items: center; /* Vertically align badge and dates */
+            gap: 12px;
             border-bottom: 1px solid #f5f5f5;
-            transition: background 0.1s;
-            font-size: 0.95em;
-            color: #444;
         }
 
-        .ranking-item:last-child {
+        .ranking-row:last-child {
             border-bottom: none;
         }
 
-        .ranking-item:hover {
-            background: #f0f7ff;
-            color: #000;
+        .score-badge-container {
+            flex-shrink: 0; /* Prevent badge from squishing */
         }
 
+        /* The Score Badge */
         .score-badge {
-            padding: 4px 10px;
-            border-radius: 20px;
-            font-size: 0.8em;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.85em;
             font-weight: 700;
-            min-width: 30px;
+            display: inline-block;
+            min-width: 50px;
             text-align: center;
         }
 
-        /* Badge Colors */
-        .score-high { background: #e8f5e9; color: #2e7d32; } /* Top tier */
-        .score-mid  { background: #fff3e0; color: #ef6c00; } /* Middle tier */
-        .score-low  { background: #ffebee; color: #c62828; } /* Bottom tier */
+        /* Date Chips Container */
+        .chip-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            flex-grow: 1;
+        }
 
-        /* Dark Mode Adjustments */
-        body.dark-mode .ranking-trigger {
-            background: #1b5e20;
-            color: #a5d6a7;
-            border-color: #2e7d32;
+        /* Individual Date Chip */
+        .date-chip {
+            background: #f5f7fa;
+            color: #444;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            cursor: pointer;
+            border: 1px solid #e0e0e0;
+            transition: all 0.2s;
+            user-select: none;
+            white-space: nowrap;
         }
-        body.dark-mode .ranking-trigger:hover { background: #2e7d32; }
-        body.dark-mode .ranking-menu {
-            background: #2d2d2d;
-            border-color: #444;
+
+        .date-chip:hover {
+            background: #e3f2fd; /* Light blue on hover */
+            color: #1565c0;
+            border-color: #90caf9;
+            transform: translateY(-1px);
         }
-        body.dark-mode .ranking-item {
-            color: #e0e0e0;
-            border-bottom-color: #444;
-        }
-        body.dark-mode .ranking-item:hover { background: #3a3a3a; }
-        body.dark-mode .score-high { background: #1b5e20; color: #a5d6a7; }
-        body.dark-mode .score-mid { background: #e65100; color: #ffe0b2; }
-        body.dark-mode .score-low { background: #b71c1c; color: #ffcdd2; }
+
+        /* Score Colors */
+        .score-high { background: #e8f5e9; color: #2e7d32; }
+        .score-mid  { background: #fff3e0; color: #ef6c00; }
+        .score-low  { background: #ffebee; color: #c62828; }
+
+        /* Dark Mode Overrides */
+        body.dark-mode .ranking-menu { background: #2d2d2d; border-color: #444; }
+        body.dark-mode .ranking-row { border-bottom-color: #444; }
+        body.dark-mode .date-chip { background: #3a3a3a; color: #e0e0e0; border-color: #555; }
+        body.dark-mode .date-chip:hover { background: #1565c0; color: white; border-color: #1565c0; }
         
         .poll-container {
             background: white;
@@ -545,6 +559,7 @@
     <script>
         const pollSlug = '{{ poll_slug }}';
         let pollData = null;
+        const unlockedPlayerIds = new Set();
         
         function escapeHtml(text) {
             if (!text) return text;
@@ -617,11 +632,17 @@
                     ? '<span title="Dungeon Master" style="cursor:help; margin-left:5px;">👑</span>' 
                     : '';
                 
-                // CHANGE: Added 'player-row locked' class and the Lock Toggle Span
+                // --- STATE CHECK ---
+                const isUnlocked = unlockedPlayerIds.has(player.id);
+                const rowClass = isUnlocked ? 'player-row' : 'player-row locked';
+                const rowStyle = isUnlocked ? 'opacity: 1;' : '';
+                const lockIcon = isUnlocked ? '🔓' : '🔒';
+                const lockTitle = isUnlocked ? 'Click to lock row' : 'Click to unlock row';
+
                 return `
-                    <tr class="player-row locked">
+                    <tr class="${rowClass}" style="${rowStyle}">
                         <td class="player-name-cell" style="font-weight: 600;">
-                            <span class="lock-toggle" onclick="toggleRowLock(this)" title="Click to unlock row">🔒</span>
+                            <span class="lock-toggle" onclick="toggleRowLock(this, ${player.id})" title="${lockTitle}">${lockIcon}</span>
                             ${escapeHtml(player.name)} ${dmBadge}
                         </td>
                         ${pollData.dates.map(date => {
@@ -652,48 +673,83 @@
             // Render admin controls
             const controls = document.getElementById('admin-controls');
             if (!poll.is_closed) {
-                // 1. Convert scores to a sorted array of objects: [{date: '...', score: 15}, ...]
-                const rankedDates = Object.entries(pollData.date_scores)
-                    .filter(([_, score]) => score > 0) // Filter out zero scores
-                    .map(([date, score]) => ({ date, score }))
-                    .sort((a, b) => b.score - a.score); // Sort highest score first
+                // 1. Group dates by score
+                const datesByScore = {};
+                Object.entries(pollData.date_scores).forEach(([date, score]) => {
+                    if (score > 0) {
+                        if (!datesByScore[score]) datesByScore[score] = [];
+                        datesByScore[score].push(date);
+                    }
+                });
 
-                const bestDate = rankedDates.length > 0 ? rankedDates[0] : null;
-                const bestScore = bestDate ? bestDate.score : 0;
+                // 2. Sort scores descending
+                const sortedScores = Object.keys(datesByScore)
+                    .map(Number)
+                    .sort((a, b) => b - a);
 
-                // 2. Build the Custom Dropdown HTML
+                const bestScore = sortedScores[0] || 0;
+                const bestDates = datesByScore[bestScore] || [];
+
+                // 3. Build the Widget HTML
                 let rankingWidget = '';
                 
-                if (rankedDates.length > 0) {
-                    // Generate list items
-                    const listItems = rankedDates.map(item => {
-                        // Determine badge color class based on score relative to best
+                if (sortedScores.length > 0) {
+                    // Generate Rows (One row per Score)
+                    const rowsHtml = sortedScores.map(score => {
+                        const dates = datesByScore[score];
+                        
+                        // Determine badge color
                         let badgeClass = 'score-low';
-                        if (item.score === bestScore) badgeClass = 'score-high';
-                        else if (item.score >= bestScore * 0.7) badgeClass = 'score-mid';
+                        if (score === bestScore) badgeClass = 'score-high';
+                        else if (score >= bestScore * 0.7) badgeClass = 'score-mid';
+
+                        // Generate Date Chips for this row
+                        const chipsHtml = dates.map(date => 
+                            `<span class="date-chip" onclick="selectRanking('${date}')">
+                                ${formatDate(date)}
+                             </span>`
+                        ).join('');
 
                         return `
-                            <div class="ranking-item" onclick="selectRanking('${item.date}')">
-                                <span>${formatDate(item.date)}</span>
-                                <span class="score-badge ${badgeClass}">${item.score} pts</span>
+                            <div class="ranking-row">
+                                <div class="score-badge-container">
+                                    <span class="score-badge ${badgeClass}">${score} pts</span>
+                                </div>
+                                <div class="chip-container">
+                                    ${chipsHtml}
+                                </div>
                             </div>
                         `;
                     }).join('');
+                    
+                    // Determine Trigger Label (e.g., "Best: Jan 12, Jan 13")
+                    let triggerLabel = '🏆 No dates available';
+                    if (bestDates.length > 0) {
+                        if (bestDates.length <= 2) {
+                            // If 1 or 2 dates, list them
+                            triggerLabel = `🏆 Best: ${bestDates.map(d => formatDate(d)).join(', ')}`;
+                        } else {
+                            // If 3+ dates, just say "3 Tied Dates"
+                            triggerLabel = `🏆 Best: ${bestDates.length} Tied Dates`;
+                        }
+                    }
 
                     rankingWidget = `
                         <div class="ranking-dropdown" id="rankingDropdown">
                             <div class="ranking-trigger" onclick="toggleRankings(event)">
-                                <span>🏆 Best: ${formatDate(bestDate.date)}</span>
+                                <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%;">
+                                    ${triggerLabel}
+                                </span>
                                 <span style="font-size: 0.8em; opacity: 0.7;">▼</span>
                             </div>
                             <div class="ranking-menu" id="rankingMenu">
-                                ${listItems}
+                                ${rowsHtml}
                             </div>
                         </div>
                     `;
                 }
 
-                // 3. Render Controls
+                // 4. Render Controls
                 controls.innerHTML = `
                     <button class="btn btn-primary" onclick="showSelectDateModal()">
                         📅 Select Date
@@ -707,10 +763,14 @@
                     ${rankingWidget}
                 `;
             } else {
-                // ... (Closed poll logic remains the same) ...
+                // Closed Poll State (Unchanged)
                 controls.innerHTML = `
-                    <button class="btn btn-secondary" onclick="reopenPoll()">🔓 Reopen Poll</button>
-                    <button class="btn btn-danger" onclick="deletePoll()">🗑️ Delete Poll</button>
+                    <button class="btn btn-secondary" onclick="reopenPoll()">
+                        🔓 Reopen Poll
+                    </button>
+                    <button class="btn btn-danger" onclick="deletePoll()">
+                        🗑️ Delete Poll
+                    </button>
                 `;
             }
         }
@@ -879,7 +939,7 @@
         // Initialize button text on load
         updateDarkModeButton(savedDarkMode);
         
-        function toggleRowLock(element) {
+        function toggleRowLock(element, playerId) {
             // Find the parent <tr> element
             const row = element.closest('tr');
             
@@ -889,18 +949,21 @@
             if (isLocked) {
                 // UNLOCK ACTION
                 row.classList.remove('locked');
-                element.textContent = '🔓'; // Change to open lock
+                element.textContent = '🔓'; 
                 element.title = "Click to lock row";
-                
-                // Optional: visual feedback
-                row.style.transition = "opacity 0.3s";
                 row.style.opacity = "1"; 
+                
+                // Save to state
+                unlockedPlayerIds.add(playerId);
             } else {
                 // LOCK ACTION
                 row.classList.add('locked');
-                element.textContent = '🔒'; // Change to closed lock
+                element.textContent = '🔒'; 
                 element.title = "Click to unlock row";
-                row.style.opacity = ""; // Return to CSS defined opacity
+                row.style.opacity = "";
+                
+                // Remove from state
+                unlockedPlayerIds.delete(playerId);
             }
         }
         
