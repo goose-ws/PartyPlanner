@@ -65,6 +65,114 @@
             pointer-events: auto;
         }
         
+        /* --- Custom Ranking Dropdown Styles --- */
+        .ranking-dropdown {
+            position: relative;
+            flex: 1;
+            min-width: 220px;
+        }
+
+        .ranking-trigger {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 12px 15px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-weight: 600;
+            user-select: none;
+            border: 1px solid #c8e6c9;
+            transition: all 0.2s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .ranking-trigger:hover {
+            background: #c8e6c9;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .ranking-menu {
+            display: none;
+            position: absolute;
+            bottom: 110%; /* Floats ABOVE the button so it doesn't get cut off */
+            left: 0;
+            width: 100%;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.2s, transform 0.2s;
+        }
+
+        .ranking-menu.show {
+            display: block;
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .ranking-item {
+            padding: 12px 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            border-bottom: 1px solid #f5f5f5;
+            transition: background 0.1s;
+            font-size: 0.95em;
+            color: #444;
+        }
+
+        .ranking-item:last-child {
+            border-bottom: none;
+        }
+
+        .ranking-item:hover {
+            background: #f0f7ff;
+            color: #000;
+        }
+
+        .score-badge {
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 700;
+            min-width: 30px;
+            text-align: center;
+        }
+
+        /* Badge Colors */
+        .score-high { background: #e8f5e9; color: #2e7d32; } /* Top tier */
+        .score-mid  { background: #fff3e0; color: #ef6c00; } /* Middle tier */
+        .score-low  { background: #ffebee; color: #c62828; } /* Bottom tier */
+
+        /* Dark Mode Adjustments */
+        body.dark-mode .ranking-trigger {
+            background: #1b5e20;
+            color: #a5d6a7;
+            border-color: #2e7d32;
+        }
+        body.dark-mode .ranking-trigger:hover { background: #2e7d32; }
+        body.dark-mode .ranking-menu {
+            background: #2d2d2d;
+            border-color: #444;
+        }
+        body.dark-mode .ranking-item {
+            color: #e0e0e0;
+            border-bottom-color: #444;
+        }
+        body.dark-mode .ranking-item:hover { background: #3a3a3a; }
+        body.dark-mode .score-high { background: #1b5e20; color: #a5d6a7; }
+        body.dark-mode .score-mid { background: #e65100; color: #ffe0b2; }
+        body.dark-mode .score-low { background: #b71c1c; color: #ffcdd2; }
+        
         .poll-container {
             background: white;
             border-radius: 12px;
@@ -544,65 +652,65 @@
             // Render admin controls
             const controls = document.getElementById('admin-controls');
             if (!poll.is_closed) {
-                // 1. Group all dates by their score
-                const datesByScore = {};
-                Object.entries(pollData.date_scores).forEach(([date, score]) => {
-                    if (score > 0) { // Only show dates with at least some availability
-                        if (!datesByScore[score]) datesByScore[score] = [];
-                        datesByScore[score].push(date);
-                    }
-                });
+                // 1. Convert scores to a sorted array of objects: [{date: '...', score: 15}, ...]
+                const rankedDates = Object.entries(pollData.date_scores)
+                    .filter(([_, score]) => score > 0) // Filter out zero scores
+                    .map(([date, score]) => ({ date, score }))
+                    .sort((a, b) => b.score - a.score); // Sort highest score first
 
-                // 2. Sort scores descending (Best scores first)
-                const sortedScores = Object.keys(datesByScore).sort((a, b) => b - a).map(Number);
-                const bestScore = sortedScores[0] || 0;
+                const bestDate = rankedDates.length > 0 ? rankedDates[0] : null;
+                const bestScore = bestDate ? bestDate.score : 0;
 
-                // 3. Build the Dropdown HTML
-                let rankingsHtml = '';
-                if (sortedScores.length > 0) {
-                    rankingsHtml = `
-                        <div style="flex: 1; min-width: 200px; padding: 10px; background: #e8f5e9; border-radius: 8px; color: #333; display:flex; flex-direction:column; gap:5px;">
-                            <label style="font-weight:bold; font-size:0.9em; color:#2e7d32;">
-                                🏆 Date Rankings:
-                            </label>
-                            <select style="width:100%; padding:8px; border:1px solid #a5d6a7; border-radius:4px; background:white; cursor:pointer;">
-                                ${sortedScores.map(score => {
-                                    const groupLabel = score === bestScore ? `Best Score (${score})` : `Score: ${score}`;
-                                    return `
-                                        <optgroup label="${groupLabel}">
-                                            ${datesByScore[score].map(date => 
-                                                `<option>${formatDate(date)}</option>`
-                                            ).join('')}
-                                        </optgroup>
-                                    `;
-                                }).join('')}
-                            </select>
+                // 2. Build the Custom Dropdown HTML
+                let rankingWidget = '';
+                
+                if (rankedDates.length > 0) {
+                    // Generate list items
+                    const listItems = rankedDates.map(item => {
+                        // Determine badge color class based on score relative to best
+                        let badgeClass = 'score-low';
+                        if (item.score === bestScore) badgeClass = 'score-high';
+                        else if (item.score >= bestScore * 0.7) badgeClass = 'score-mid';
+
+                        return `
+                            <div class="ranking-item" onclick="selectRanking('${item.date}')">
+                                <span>${formatDate(item.date)}</span>
+                                <span class="score-badge ${badgeClass}">${item.score} pts</span>
+                            </div>
+                        `;
+                    }).join('');
+
+                    rankingWidget = `
+                        <div class="ranking-dropdown" id="rankingDropdown">
+                            <div class="ranking-trigger" onclick="toggleRankings(event)">
+                                <span>🏆 Best: ${formatDate(bestDate.date)}</span>
+                                <span style="font-size: 0.8em; opacity: 0.7;">▼</span>
+                            </div>
+                            <div class="ranking-menu" id="rankingMenu">
+                                ${listItems}
+                            </div>
                         </div>
                     `;
                 }
 
-                // 4. Render Controls (Open Poll)
+                // 3. Render Controls
                 controls.innerHTML = `
                     <button class="btn btn-primary" onclick="showSelectDateModal()">
-                        📅 Select Date & Close
+                        📅 Select Date
                     </button>
                     <button class="btn btn-secondary" style="background: #ff9800; color: white;" onclick="cancelSession()">
-                        🚫 Scrub/Cancel Session
+                        🚫 Cancel
                     </button>
                     <button class="btn btn-danger" onclick="deletePoll()">
-                        🗑️ Delete Poll
+                        🗑️ Delete
                     </button>
-                    ${rankingsHtml}
+                    ${rankingWidget}
                 `;
             } else {
-                // Render Controls (Closed Poll)
+                // ... (Closed poll logic remains the same) ...
                 controls.innerHTML = `
-                    <button class="btn btn-secondary" onclick="reopenPoll()">
-                        🔓 Reopen Poll
-                    </button>
-                    <button class="btn btn-danger" onclick="deletePoll()">
-                        🗑️ Delete Poll
-                    </button>
+                    <button class="btn btn-secondary" onclick="reopenPoll()">🔓 Reopen Poll</button>
+                    <button class="btn btn-danger" onclick="deletePoll()">🗑️ Delete Poll</button>
                 `;
             }
         }
@@ -794,6 +902,37 @@
                 element.title = "Click to unlock row";
                 row.style.opacity = ""; // Return to CSS defined opacity
             }
+        }
+        
+        // Toggle the visibility of the ranking menu
+        function toggleRankings(e) {
+            e.stopPropagation(); // Prevent immediate closing
+            const menu = document.getElementById('rankingMenu');
+            menu.classList.toggle('show');
+            
+            // Auto-close if clicking outside
+            if (menu.classList.contains('show')) {
+                document.addEventListener('click', closeRankingsOutside);
+            }
+        }
+
+        function closeRankingsOutside(e) {
+            const dropdown = document.getElementById('rankingDropdown');
+            if (dropdown && !dropdown.contains(e.target)) {
+                document.getElementById('rankingMenu').classList.remove('show');
+                document.removeEventListener('click', closeRankingsOutside);
+            }
+        }
+
+        // When a date is clicked in the list, open the modal with that date pre-selected
+        function selectRanking(dateStr) {
+            showSelectDateModal(); // Open the modal
+            const select = document.getElementById('date-select');
+            if (select) {
+                select.value = dateStr; // Select the date
+            }
+            // Close the dropdown
+            document.getElementById('rankingMenu').classList.remove('show');
         }
     </script>
 </body>
