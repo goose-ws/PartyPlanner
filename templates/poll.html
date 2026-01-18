@@ -541,19 +541,47 @@
                 `;
             }).join('');
             
-            // ... (rest of function remains the same, controls usually don't need escaping) ...
-            // Note: Just ensure the closing brace } matches the function start.
-            // The "admin-controls" section is safe because it uses hardcoded strings mostly.
-            
-            // Render admin controls (abbreviated for the block, keep your original logic here)
+            // Render admin controls
             const controls = document.getElementById('admin-controls');
             if (!poll.is_closed) {
-                // ...
-                const maxScore = Math.max(...Object.values(pollData.date_scores));
-                const bestDates = Object.entries(pollData.date_scores)
-                    .filter(([_, score]) => score === maxScore && score > 0)
-                    .map(([date, _]) => date);
+                // 1. Group all dates by their score
+                const datesByScore = {};
+                Object.entries(pollData.date_scores).forEach(([date, score]) => {
+                    if (score > 0) { // Only show dates with at least some availability
+                        if (!datesByScore[score]) datesByScore[score] = [];
+                        datesByScore[score].push(date);
+                    }
+                });
 
+                // 2. Sort scores descending (Best scores first)
+                const sortedScores = Object.keys(datesByScore).sort((a, b) => b - a).map(Number);
+                const bestScore = sortedScores[0] || 0;
+
+                // 3. Build the Dropdown HTML
+                let rankingsHtml = '';
+                if (sortedScores.length > 0) {
+                    rankingsHtml = `
+                        <div style="flex: 1; min-width: 200px; padding: 10px; background: #e8f5e9; border-radius: 8px; color: #333; display:flex; flex-direction:column; gap:5px;">
+                            <label style="font-weight:bold; font-size:0.9em; color:#2e7d32;">
+                                🏆 Date Rankings:
+                            </label>
+                            <select style="width:100%; padding:8px; border:1px solid #a5d6a7; border-radius:4px; background:white; cursor:pointer;">
+                                ${sortedScores.map(score => {
+                                    const groupLabel = score === bestScore ? `Best Score (${score})` : `Score: ${score}`;
+                                    return `
+                                        <optgroup label="${groupLabel}">
+                                            ${datesByScore[score].map(date => 
+                                                `<option>${formatDate(date)}</option>`
+                                            ).join('')}
+                                        </optgroup>
+                                    `;
+                                }).join('')}
+                            </select>
+                        </div>
+                    `;
+                }
+
+                // 4. Render Controls (Open Poll)
                 controls.innerHTML = `
                     <button class="btn btn-primary" onclick="showSelectDateModal()">
                         📅 Select Date & Close
@@ -564,14 +592,10 @@
                     <button class="btn btn-danger" onclick="deletePoll()">
                         🗑️ Delete Poll
                     </button>
-                    ${bestDates.length > 0 ? `
-                        <div style="flex: 1; min-width: 200px; padding: 10px; background: #e8f5e9; border-radius: 8px; color: #333;">
-                            <strong>Best Date${bestDates.length > 1 ? 's' : ''}:</strong> 
-                            ${bestDates.map(d => formatDate(d)).join(', ')}
-                        </div>
-                    ` : ''}
+                    ${rankingsHtml}
                 `;
             } else {
+                // Render Controls (Closed Poll)
                 controls.innerHTML = `
                     <button class="btn btn-secondary" onclick="reopenPoll()">
                         🔓 Reopen Poll
