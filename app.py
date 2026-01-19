@@ -3,6 +3,8 @@ import json
 import secrets
 import re
 import time
+import atexit
+import fcntl
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, abort
 from flask_wtf.csrf import CSRFProtect
@@ -1430,11 +1432,34 @@ def check_notifications():
     cursor.close()
     conn.close()
 
-# Initialize scheduler
-scheduler = BackgroundScheduler()
-scheduler.add_job(check_and_create_polls, CronTrigger(hour=0, minute=0))  # Daily at midnight
-scheduler.add_job(check_notifications, CronTrigger(hour='*/6'))  # Every 6 hours
-scheduler.start()
+# Initialize scheduler with a Lock to prevent duplicates in Gunicorn
+def start_scheduler():
+    try:
+        # Create a lock file
+        f = open("scheduler.lock", "w")
+
+        # Try to acquire an exclusive, non-blocking lock
+        # If another worker has this locked, this will raise an IOError
+        fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+        # If we made it here, we are the only worker with the lock
+        scheduler = BackgroundScheduler()
+        scheduler.add_job(check_and_create_polls, CronTrigger(hour=0, minute=0))
+        scheduler.add_job(check_notifications, CronTrigger(hour='*/6'))
+        scheduler.start()
+
+        print("✅ Scheduler started in this worker.")
+
+        # Ensure we release the lock when the process exits
+        atexit.register(lambda: fcntl.lockf(f, fcntl.LOCK_UN))
+
+    except IOError:
+        # This worker failed to grab the lock, so it shouldn't run the scheduler
+        print("ℹ️ Scheduler already running in another worker. Skipping.")
+
+# Only start scheduler if we are not in debug/reloader mode (to prevent double runs in dev)
+if os.environ.get('WERKZEUG_RUN_MAIN') != 'true':
+    start_scheduler()
 
 if __name__ == '__main__':
     init_db()
