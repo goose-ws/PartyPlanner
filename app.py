@@ -218,7 +218,10 @@ def init_db():
             notified_two_weeks BOOLEAN DEFAULT FALSE,
             notified_one_week BOOLEAN DEFAULT FALSE,
             FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
-            INDEX idx_slug (slug)
+            INDEX idx_slug (slug),
+            FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE,
+            INDEX idx_slug (slug),
+            UNIQUE KEY unique_session_number (campaign_id, session_number)
         )
     ''')
     
@@ -1087,6 +1090,14 @@ def save_response():
     data = request.json
     conn = get_db()
     cursor = conn.cursor()
+    # Check if poll is open BEFORE accepting the vote
+    cursor.execute('SELECT is_closed FROM polls WHERE id = %s', (data['poll_id'],))
+    poll = cursor.fetchone()
+    
+    if not poll or poll[0]: # If poll doesn't exist OR is_closed is True
+        cursor.close()
+        conn.close()
+        return jsonify({'success': False, 'error': 'Poll is closed'}), 403
     
     # 1. Lookup Player Name for the Audit Log
     player_name = f"Player {data['player_id']}" # Default fallback
@@ -1445,7 +1456,7 @@ def start_scheduler():
         # If we made it here, we are the only worker with the lock
         scheduler = BackgroundScheduler()
         scheduler.add_job(check_and_create_polls, CronTrigger(hour=0, minute=0))
-        scheduler.add_job(check_notifications, CronTrigger(hour='*/6'))
+        scheduler.add_job(check_notifications, CronTrigger(hour='*/2'))
         scheduler.start()
 
         print("✅ Scheduler started in this worker.")
