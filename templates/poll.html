@@ -266,14 +266,41 @@
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             font-weight: 600;
+            /* Sticky Properties */
             position: sticky;
             top: 0;
+            z-index: 10; /* Ensures headers float above the body content */
         }
         
         th.player-name {
             background: #f5f7fa;
             color: #333;
             min-width: 150px;
+            /* NEW Sticky Properties */
+            position: sticky;
+            left: 0;
+            top: 0;
+            z-index: 20; /* Highest priority: stays above row headers AND column headers */
+            
+            /* Optional: Add a shadow or border to show separation */
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+        }
+        
+        .player-name-cell {
+            position: sticky;
+            left: 0;
+            z-index: 5; /* Higher than normal cells (0), lower than headers (10) */
+            background: white; /* Vital: prevents transparency so you don't see text scrolling behind it */
+            
+            /* Optional: Separation styling */
+            box-shadow: 2px 0 5px rgba(0,0,0,0.05); 
+        }
+        
+        /* Update the sticky player column */
+        body.dark-mode .player-name-cell {
+            background: #1a1a1a !important; /* Matches body bg */
+            color: #ffffff !important;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.5);
         }
         
         .date-header {
@@ -454,13 +481,13 @@
         body.dark-mode label,
         body.dark-mode .info-row,
         body.dark-mode th.player-name {
-            background: #2d2d2d;
-            color: #e0e0e0;
-            border-color: #444;
+            background: #2d2d2d !important;
+            color: #ffffff !important; 
+            box-shadow: 2px 0 5px rgba(0,0,0,0.5);
         }
 
         body.dark-mode th {
-            border-color: #444;
+            color: #ffffff !important;
         }
 
         body.dark-mode td {
@@ -477,6 +504,10 @@
             background: #1a1a1a;
             color: #e0e0e0;
             border-color: #444;
+        }
+        
+        body.dark-mode .lock-toggle {
+            color: #ffffff;
         }
 
         body.dark-mode .poll-info,
@@ -609,7 +640,7 @@
             const header = document.getElementById('table-header');
             header.innerHTML = `
                 <tr>
-                    <th class="player-name">Player</th>
+                    <th class="player-name">Date</th>
                     ${pollData.dates.map(date => `
                         <th class="date-header">${formatDate(date)}</th>
                     `).join('')}
