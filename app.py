@@ -1450,13 +1450,35 @@ def start_scheduler():
         f = open("scheduler.lock", "w")
 
         # Try to acquire an exclusive, non-blocking lock
-        # If another worker has this locked, this will raise an IOError
         fcntl.lockf(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
         # If we made it here, we are the only worker with the lock
         scheduler = BackgroundScheduler()
+        
+        # 1. Daily Poll Creation (Fixed)
         scheduler.add_job(check_and_create_polls, CronTrigger(hour=0, minute=0))
-        scheduler.add_job(check_notifications, CronTrigger(hour='*/2'))
+        
+        # 2. Notification Check (Configurable)
+        # Default: Minute 0 of every 6th hour (0, 6, 12, 18)
+        notification_trigger = CronTrigger(hour='*/6', minute=0)
+        
+        custom_cron = os.environ.get('NOTIFICATION_CRON')
+        
+        if custom_cron:
+            try:
+                # Validate: Must be exactly 5 fields
+                if len(custom_cron.strip().split()) != 5:
+                    raise ValueError("Schedule must use strict 5-field format (min hour day month dow)")
+                
+                # Attempt to parse
+                notification_trigger = CronTrigger.from_crontab(custom_cron)
+                print(f"✅ Scheduler: Using custom notification schedule: '{custom_cron}'")
+                
+            except Exception as e:
+                print(f"⚠️ Scheduler: Invalid NOTIFICATION_CRON '{custom_cron}'. Error: {e}")
+                print(f"ℹ️ Scheduler: Reverting to default (Every 6 hours).")
+        
+        scheduler.add_job(check_notifications, notification_trigger)
         scheduler.start()
 
         print("✅ Scheduler started in this worker.")

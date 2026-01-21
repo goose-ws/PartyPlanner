@@ -38,6 +38,7 @@ services:
       SECRET_KEY: "GenerateARandomStringHere"
       APP_URL: "https://partyplanner.domain.tld"
       SESSION_TIMEOUT: "180d"
+      NOTIFICATION_CRON: "0 8,20 * * *"
       TZ: "America/New_York"
       APP_ENV: "development"
     volumes:
@@ -74,6 +75,7 @@ docker compose up -d
 | `SECRET_KEY` | Key for signing session cookies (Set to a long, random string) | `dev-secret...` (Unsafe) |
 | `APP_URL` | Public URL used in Discord links | `http://localhost:5000` |
 | `SESSION_TIMEOUT` | Login duration (e.g., `12h`, `180d`) | `24h` |
+| `NOTIFICATION_CRON` | Five field cron schedule for when you want scheduled tasks (Notifications) to be sent (e.g., `"0 8,20 * * *"`) | `"0 */6 * * *"` |
 | `TZ` | Container Timezone | `UTC` |
 | `APP_ENV` | Set to `production` to enable Secure/SameSite cookies (**Necessary if using HTTPS**) | `development` |
 
