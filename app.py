@@ -1375,15 +1375,14 @@ def check_notifications():
             total_days_in_poll = (end_date - start_date).days + 1
 
             # --- START CHANGE ---
-            # Fetch name AND discord_id
             cursor.execute('''
                 SELECT pl.name, pl.discord_id
                 FROM players pl
                 LEFT JOIN responses r ON pl.id = r.player_id AND r.poll_id = %s
                 WHERE pl.campaign_id = %s
                 GROUP BY pl.id
-                HAVING COUNT(r.id) < %s
-            ''', (poll['id'], poll['campaign_id'], total_days_in_poll))
+                HAVING COUNT(r.id) = 0
+            ''', (poll['id'], poll['campaign_id']))
             
             non_responders = []
             for row in cursor.fetchall():
