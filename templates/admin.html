@@ -84,6 +84,38 @@
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
         }
         
+        .player-tag {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            /* NEW: Clickable styling */
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .player-tag:hover {
+            background: #c8e6c9;
+            border-color: #81c784;
+        }
+        
+        .player-tag .remove {
+            cursor: pointer;
+            font-weight: bold;
+            padding: 0 4px;
+            border-radius: 50%;
+        }
+        
+        .player-tag .remove:hover {
+            background: rgba(0,0,0,0.1);
+            color: #c62828;
+        }
+        
         .campaigns-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -481,7 +513,10 @@
                 <div class="form-group">
                     <label>Players</label>
                     <div class="players-input">
-                        <input type="text" id="player-name" placeholder="Enter player name" onkeypress="if(event.key==='Enter'){event.preventDefault();addPlayer();}">
+                        <input type="text" id="player-name" placeholder="Enter player name" style="flex: 1;" onkeypress="if(event.key==='Enter'){event.preventDefault();addPlayer();}">
+                        
+                        <input type="text" id="player-discord-id" placeholder="Discord ID (Optional)" style="flex: 1;" onkeypress="if(event.key==='Enter'){event.preventDefault();addPlayer();}">
+                        
                         <div class="checkbox-group" style="white-space: nowrap; padding: 0 10px; background: #f5f5f5; border-radius: 8px; border: 1px solid #e0e0e0;">
                             <input type="checkbox" id="player-is-dm">
                             <label for="player-is-dm" style="margin: 0; cursor: pointer;">Is DM?</label>
@@ -606,6 +641,9 @@
             document.getElementById('modal-title').textContent = 'Create Campaign';
             document.getElementById('campaign-form').reset();
             document.getElementById('players-list').innerHTML = '';
+            if(document.getElementById('player-discord-id')) {
+                document.getElementById('player-discord-id').value = '';
+            }
             document.getElementById('campaign-schedule-type').value = 'dynamic';
             toggleScheduleFields();
             document.getElementById('campaign-modal').style.display = 'block';
@@ -664,6 +702,10 @@
             document.getElementById('campaign-deadline-respond').value = campaign.deadline_respond || 14;
             document.getElementById('campaign-deadline-decide').value = campaign.deadline_decide || 7;
             
+            if(document.getElementById('player-discord-id')) {
+                document.getElementById('player-discord-id').value = '';
+            }
+            
             // Load players for this campaign
             const response = await fetch(`/api/campaigns/${id}/players`);
             const data = await response.json();
@@ -678,18 +720,39 @@
         }
         
         function addPlayer() {
-            const input = document.getElementById('player-name');
+            const nameInput = document.getElementById('player-name');
+            const idInput = document.getElementById('player-discord-id');
             const isDmCheckbox = document.getElementById('player-is-dm');
-            const name = input.value.trim();
+            
+            const name = nameInput.value.trim();
+            const discordId = idInput.value.trim();
             const isDm = isDmCheckbox.checked;
             
+            // VALIDATION: Discord IDs are numeric snowflakes (17-20 digits)
+            if (discordId) {
+                if (!/^\d{17,20}$/.test(discordId)) {
+                    alert("Invalid Discord ID.\n\nIDs must be a string of numbers (usually 18-19 digits).\nDo not include names or hashtags.");
+                    return;
+                }
+            }
+            
+            // Check for duplicates
             if (name && !players.some(p => p.name === name)) {
-                // If this player is DM, ensure no one else is (optional strictness, or allow co-DMs)
-                // For now, we allow multiple DMs or just one. Let's stick to list logic.
-                players.push({ name: name, is_dm: isDm });
+                players.push({ 
+                    name: name, 
+                    is_dm: isDm, 
+                    discord_id: discordId || null 
+                });
+                
                 renderPlayers();
-                input.value = '';
+                
+                // Reset inputs
+                nameInput.value = '';
+                idInput.value = '';
                 isDmCheckbox.checked = false;
+                nameInput.focus();
+            } else if (players.some(p => p.name === name)) {
+                alert('Player "' + name + '" is already in the list. Click their tag to edit them.');
             }
         }
         
@@ -702,18 +765,55 @@
             const list = document.getElementById('players-list');
             list.innerHTML = '';
             
-            players.forEach(player => {
+            players.forEach((player, index) => {
                 const tag = document.createElement('div');
                 tag.className = 'player-tag';
-                const dmBadge = player.is_dm ? '<span style="background:#ff9800; color:white; padding:2px 6px; border-radius:10px; font-size:10px; margin-right:5px;">DM</span>' : '';
+                tag.title = "Click to edit this player";
                 
-                // SECURITY UPDATE: escapeHtml() added to name
+                // EDIT ACTION: Clicking the tag body triggers edit
+                tag.onclick = (e) => {
+                    // Prevent triggering if clicking the 'x' button
+                    if (!e.target.classList.contains('remove')) {
+                        editPlayer(index);
+                    }
+                };
+                
+                const dmBadge = player.is_dm 
+                    ? '<span style="background:#ff9800; color:white; padding:2px 6px; border-radius:10px; font-size:10px; margin-right:5px;">DM</span>' 
+                    : '';
+
+                const idBadge = player.discord_id 
+                    ? '<span title="ID: ' + player.discord_id + '" style="cursor:help; margin-left:5px; opacity:0.7;">🆔</span>' 
+                    : '';
+                
+                // Note: passing index to removePlayer is safer than name
                 tag.innerHTML = `
-                    ${dmBadge}${escapeHtml(player.name)}
-                    <span class="remove" onclick="removePlayer('${escapeHtml(player.name).replace(/'/g, "\\'")}')">×</span>
+                    ${dmBadge}${escapeHtml(player.name)}${idBadge}
+                    <span class="remove" onclick="removePlayer(${index})">×</span>
                 `;
                 list.appendChild(tag);
             });
+        }
+        
+        function editPlayer(index) {
+            const player = players[index];
+            
+            // 1. Populate the inputs with the player's data
+            document.getElementById('player-name').value = player.name;
+            document.getElementById('player-discord-id').value = player.discord_id || '';
+            document.getElementById('player-is-dm').checked = player.is_dm;
+            
+            // 2. Remove them from the list (so we don't duplicate when "Adding" back)
+            players.splice(index, 1);
+            renderPlayers();
+            
+            // 3. Focus the name field
+            document.getElementById('player-name').focus();
+        }
+
+        function removePlayer(index) {
+            players.splice(index, 1);
+            renderPlayers();
         }
         
         document.getElementById('campaign-form').addEventListener('submit', async (e) => {

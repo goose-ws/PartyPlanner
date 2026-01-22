@@ -49,6 +49,27 @@
             transform: scale(1.2);
         }
 
+        /* The "Ghost" No (Default state) */
+        .status-ghost {
+            background-color: #ffebee; /* Very light red */
+            color: #b71c1c;
+            border: 1px dashed #ef9a9a; /* Dashed border indicates "not finalized" */
+            opacity: 0.6;
+        }
+
+        /* Ensure the Real "No" is solid and distinct */
+        .status-no {
+            background-color: #ef5350 !important; /* Solid Red */
+            color: white !important;
+            border: 1px solid #d32f2f;
+            opacity: 1;
+        }
+
+        /* Adjust the other statuses to ensure they look distinct from ghost */
+        .status-yes { background-color: #66bb6a; color: white; }
+        .status-if_needed { background-color: #ffa726; color: white; }
+        .status-maybe { background-color: #bdbdbd; color: white; }
+
         /* Visual style for a locked row */
         .player-row.locked {
             opacity: 0.6; /* Dims the row to indicate it is inactive */
@@ -677,23 +698,38 @@
                             ${escapeHtml(player.name)} ${dmBadge}
                         </td>
                         ${pollData.dates.map(date => {
+                            // Find existing response
                             const response = pollData.responses.find(r => 
-                                r.player_id === player.id && r.response_date === date
+                                r.player_id === player.id && 
+                                r.response_date === date
                             );
-                            const availability = response ? response.availability : 'none';
-                            const text = {
-                                'yes': '✅ Yes',
-                                'if_needed': '🟡 If Needed',
-                                'maybe': '🟠 Maybe',
-                                'no': '❌ No',
-                                'none': '-'
-                            }[availability];
                             
+                            const status = response ? response.availability : null;
+                            
+                            // NEW LOGIC: Text Labels Restored
+                            // Default to "Ghost No" if null
+                            let displayClass = 'status-ghost';
+                            let displayText = 'No'; // Default text
+                            let displayLabel = 'No (Default)';
+                            
+                            if (status) {
+                                displayClass = `status-${status}`;
+                                switch(status) {
+                                    case 'yes': displayText = 'Yes'; displayLabel = 'Yes'; break;
+                                    case 'if_needed': displayText = 'If Needed'; displayLabel = 'If Needed'; break;
+                                    case 'maybe': displayText = 'Maybe'; displayLabel = 'Maybe'; break;
+                                    case 'no': displayText = 'No'; displayLabel = 'No'; break;
+                                }
+                            }
+
+                            // Pass the 'status' (which might be null) to changeAvailability
+                            const safeStatus = status ? `'${status}'` : 'null';
+
                             return `
-                                <td class="clickable availability-${availability}" 
-                                    onclick="changeAvailability(${player.id}, '${date}', '${availability}')"
-                                    ${poll.is_closed ? 'style="cursor: not-allowed;"' : ''}>
-                                    ${text}
+                                <td class="clickable ${displayClass}" 
+                                    onclick="changeAvailability('${pollSlug}', ${player.id}, '${date}', ${safeStatus})"
+                                    title="${displayLabel} - Click to change">
+                                    ${displayText}
                                 </td>
                             `;
                         }).join('')}
@@ -832,47 +868,57 @@
             loadPoll();
         }
         
-        async function changeAvailability(playerId, date, currentAvailability) {
-            if (pollData.poll.is_closed) {
-                alert('This poll is closed and cannot be modified.');
-                return;
+        async function changeAvailability(pollSlug, playerId, dateStr, currentStatus) {
+            // Check if row is locked
+            const row = document.getElementById(`row-${playerId}`);
+            if (row && row.classList.contains('locked')) {
+                // Optional: Shake animation or visual cue
+                return; 
             }
+
+            // Define the cycle (Removed 'null/clear')
+            const cycle = ['yes', 'if_needed', 'maybe', 'no'];
             
-            const options = ['yes', 'if_needed', 'maybe', 'no', 'clear'];
-            const currentIndex = options.indexOf(currentAvailability);
-            const nextIndex = (currentIndex + 1) % options.length;
-            const newAvailability = currentIndex === -1 ? 'yes' : options[nextIndex];
+            // Determine next status
+            // If currentStatus is null (Ghost), we start at 'yes'
+            // If currentStatus is 'no', we loop back to 'yes'
+            let nextStatus = 'yes';
             
-            if (newAvailability === 'clear') {
-                await fetch('/api/responses/delete', {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken // <--- Added Header
-                    },
-                    body: JSON.stringify({
-                        poll_id: pollData.poll.id,
-                        player_id: playerId,
-                        response_date: date
-                    })
-                });
-            } else {
+            if (currentStatus) {
+                const currentIndex = cycle.indexOf(currentStatus);
+                if (currentIndex !== -1) {
+                    const nextIndex = (currentIndex + 1) % cycle.length;
+                    nextStatus = cycle[nextIndex];
+                }
+            }
+
+            // Optimistic UI Update (Instant feedback)
+            // We can't easily find the specific cell without passing the element, 
+            // but the loadPoll() will fix it milliseconds later.
+            
+            try {
+                // We ALWAYS use save_response now. No more delete_response.
                 await fetch('/api/responses', {
                     method: 'POST',
-                    headers: { 
+                    headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken // <--- Added Header
+                        'X-CSRFToken': csrfToken
                     },
                     body: JSON.stringify({
                         poll_id: pollData.poll.id,
                         player_id: playerId,
-                        response_date: date,
-                        availability: newAvailability
+                        response_date: dateStr,
+                        availability: nextStatus
                     })
                 });
+                
+                // Reload to reflect changes and update scores
+                loadPoll();
+                
+            } catch (error) {
+                console.error('Error saving response:', error);
+                alert('Failed to save response');
             }
-            
-            loadPoll();
         }
         
         function showSelectDateModal() {

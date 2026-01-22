@@ -413,6 +413,9 @@ def create_campaign():
     conn = get_db()
     cursor = conn.cursor()
     
+    # ... (Campaign Insert Logic remains the same) ...
+    # Copy your existing Insert for campaigns here, or just replace the player block below
+    
     # If this campaign should be active, deactivate others
     if data.get('is_active'):
         cursor.execute('UPDATE campaigns SET is_active = FALSE')
@@ -441,25 +444,29 @@ def create_campaign():
     campaign_id = cursor.lastrowid
     log_audit('CAMPAIGN_CREATE', f"Created campaign '{data['name']}'", 'campaign', campaign_id)
     
-    # Add players (This works for both create_campaign and update_campaign)
+    # --- START CHANGE ---
     if 'players' in data:
         for player in data['players']:
             # Handle both string (legacy) and dict (new) inputs
             if isinstance(player, dict):
                 name = player.get('name')
                 is_dm = player.get('is_dm', False)
+                discord_id = player.get('discord_id', None) # Extract ID
             else:
                 name = player
                 is_dm = False
+                discord_id = None
                 
-            cursor.execute('INSERT INTO players (campaign_id, name, is_dm) VALUES (%s, %s, %s)', 
-                         (campaign_id, name, is_dm))
+            cursor.execute('''
+                INSERT INTO players (campaign_id, name, is_dm, discord_id) 
+                VALUES (%s, %s, %s, %s)
+            ''', (campaign_id, name, is_dm, discord_id))
+    # --- END CHANGE ---
     
     conn.commit()
     cursor.close()
     conn.close()
     
-    # Generate initial polls for this campaign
     generate_polls_for_campaign(campaign_id)
     
     return jsonify({'id': campaign_id, 'success': True})
@@ -471,6 +478,7 @@ def update_campaign(campaign_id):
     conn = get_db()
     cursor = conn.cursor()
     
+    # ... (Campaign Update Logic remains the same) ...
     # If this campaign should be active, deactivate others
     if data.get('is_active'):
         cursor.execute('UPDATE campaigns SET is_active = FALSE')
@@ -499,36 +507,40 @@ def update_campaign(campaign_id):
         campaign_id
     ))
     
-    # Update players
+    # --- START CHANGE ---
     if 'players' in data:
         provided_names = []
         for player in data['players']:
-            # Handle both string (legacy) and dict (new) inputs
             if isinstance(player, dict):
                 name = player.get('name')
                 is_dm = player.get('is_dm', False)
+                discord_id = player.get('discord_id', None)
             else:
                 name = player
                 is_dm = False
+                discord_id = None
                 
             provided_names.append(name)
                 
-            # FIX: Use ON DUPLICATE KEY UPDATE to update existing players instead of crashing
+            # Upsert logic: Update is_dm AND discord_id if name matches
             cursor.execute('''
-                INSERT INTO players (campaign_id, name, is_dm) 
-                VALUES (%s, %s, %s)
-                ON DUPLICATE KEY UPDATE is_dm = VALUES(is_dm)
-            ''', (campaign_id, name, is_dm))
+                INSERT INTO players (campaign_id, name, is_dm, discord_id) 
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE 
+                    is_dm = VALUES(is_dm),
+                    discord_id = VALUES(discord_id)
+            ''', (campaign_id, name, is_dm, discord_id))
             
-        # Handle deletions: Remove players that are no longer in the list
+        # Handle deletions
         if provided_names:
             placeholders = ', '.join(['%s'] * len(provided_names))
             sql = f"DELETE FROM players WHERE campaign_id = %s AND name NOT IN ({placeholders})"
             cursor.execute(sql, [campaign_id] + provided_names)
         else:
-            # If the list was explicitly cleared
             cursor.execute("DELETE FROM players WHERE campaign_id = %s", (campaign_id,))
+    # --- END CHANGE ---
             
+    # ... (Audit log logic remains the same) ...
     action_type = 'CAMPAIGN_UPDATE'
     if data.get('is_active') is False:
         action_type = 'CAMPAIGN_PAUSE'
@@ -541,7 +553,6 @@ def update_campaign(campaign_id):
     cursor.close()
     conn.close()
     
-    # Regenerate polls if needed
     generate_polls_for_campaign(campaign_id)
     
     return jsonify({'success': True})
@@ -564,14 +575,13 @@ def get_campaign_players(campaign_id):
     conn = get_db()
     cursor = conn.cursor(dictionary=True)
     
-    # Updated to select is_dm
-    cursor.execute('SELECT name, is_dm FROM players WHERE campaign_id = %s ORDER BY name', (campaign_id,))
+    # CHANGE: Added discord_id to the SELECT
+    cursor.execute('SELECT name, is_dm, discord_id FROM players WHERE campaign_id = %s ORDER BY name', (campaign_id,))
     players = cursor.fetchall()
     
     cursor.close()
     conn.close()
     
-    # Return the full object, not just the name string
     return jsonify({'players': players})
 
 @app.route('/api/polls/all', methods=['GET'])
@@ -1364,9 +1374,10 @@ def check_notifications():
                 
             total_days_in_poll = (end_date - start_date).days + 1
 
-            # Get players who haven't responded to ALL days (Response Count < Total Days)
+            # --- START CHANGE ---
+            # Fetch name AND discord_id
             cursor.execute('''
-                SELECT pl.name 
+                SELECT pl.name, pl.discord_id
                 FROM players pl
                 LEFT JOIN responses r ON pl.id = r.player_id AND r.poll_id = %s
                 WHERE pl.campaign_id = %s
@@ -1374,7 +1385,15 @@ def check_notifications():
                 HAVING COUNT(r.id) < %s
             ''', (poll['id'], poll['campaign_id'], total_days_in_poll))
             
-            non_responders = [row['name'] for row in cursor.fetchall()]
+            non_responders = []
+            for row in cursor.fetchall():
+                # If they have a Discord ID, format it as a ping <@12345>
+                # Otherwise, just use their name
+                if row['discord_id']:
+                    non_responders.append(f"<@{row['discord_id']}>")
+                else:
+                    non_responders.append(row['name'])
+            # --- END CHANGE ---
             
             if non_responders:
                 send_discord_notification(
