@@ -294,34 +294,60 @@
         }
         
         th.player-name {
-            background: #f5f7fa;
+            background: #f5f7fa !important;
             color: #333;
             min-width: 150px;
-            /* NEW Sticky Properties */
             position: sticky;
             left: 0;
-            top: 0;
-            z-index: 20; /* Highest priority: stays above row headers AND column headers */
-            
-            /* Optional: Add a shadow or border to show separation */
+            z-index: 30; /* Much higher than other elements */
+            background-clip: padding-box;
             box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            border-right: 2px solid #e0e0e0;
         }
         
         .player-name-cell {
-            position: sticky;
-            left: 0;
-            z-index: 5; /* Higher than normal cells (0), lower than headers (10) */
-            background: white; /* Vital: prevents transparency so you don't see text scrolling behind it */
-            
-            /* Optional: Separation styling */
-            box-shadow: 2px 0 5px rgba(0,0,0,0.05); 
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 25 !important; /* Much higher, but still below header */
+            background: white !important;
+            background-clip: padding-box !important;
+            isolation: isolate; /* Create new stacking context */
+            box-shadow: 2px 0 5px rgba(0,0,0,0.05) !important;
+            border-right: 2px solid #e0e0e0 !important;
+            /* Block all other backgrounds */
+            background-image: none !important;
+        }
+        
+        /* Ensure player name cells don't get availability colors */
+        .player-name-cell.status-ghost,
+        .player-name-cell.status-yes,
+        .player-name-cell.status-if_needed,
+        .player-name-cell.status-maybe,
+        .player-name-cell.status-no,
+        .player-name-cell.availability-yes,
+        .player-name-cell.availability-if_needed,
+        .player-name-cell.availability-maybe,
+        .player-name-cell.availability-no,
+        .player-name-cell.availability-none {
+            background: white !important;
+            color: #333 !important;
+            background-image: none !important;
+        }
+        
+        /* Additional safeguard: override any td styles when it's a player-name-cell */
+        td.player-name-cell {
+            background: white !important;
         }
         
         /* Update the sticky player column */
         body.dark-mode .player-name-cell {
             background: #1a1a1a !important; /* Matches body bg */
             color: #ffffff !important;
-            box-shadow: 2px 0 5px rgba(0,0,0,0.5);
+            box-shadow: 1px 0 0 #444, 2px 0 5px rgba(0,0,0,0.5);
+        }
+        
+        body.dark-mode th.player-name {
+            box-shadow: 1px 0 0 #444, 2px 0 5px rgba(0,0,0,0.5);
         }
         
         .date-header {
@@ -579,10 +605,6 @@
             <div class="legend-item">
                 <div class="legend-box availability-no"></div>
                 <span>No (0)</span>
-            </div>
-            <div class="legend-item">
-                <div class="legend-box availability-none"></div>
-                <span>Clear (unset)</span>
             </div>
         </div>
         
@@ -923,9 +945,15 @@
         
         function showSelectDateModal() {
             const select = document.getElementById('date-select');
-            select.innerHTML = pollData.dates.map(date => `
+            
+            // FIX: Add a disabled placeholder option at the top
+            let optionsHtml = '<option value="" disabled selected>-- Select the winning date --</option>';
+            
+            optionsHtml += pollData.dates.map(date => `
                 <option value="${date}">${formatDate(date)}</option>
             `).join('');
+            
+            select.innerHTML = optionsHtml;
             
             // Pre-select best date if there's only one
             const maxScore = Math.max(...Object.values(pollData.date_scores));

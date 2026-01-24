@@ -1407,17 +1407,22 @@ def check_notifications():
         # One week notification
         if now >= deadline_decide_date and not poll['notified_one_week']:
             # Calculate best dates
+            # Calculate best dates with DM veto logic
             cursor.execute('''
-                SELECT response_date, 
-                       SUM(CASE availability
+                SELECT r.response_date, 
+                       SUM(CASE r.availability
                            WHEN 'yes' THEN 3
                            WHEN 'if_needed' THEN 2
                            WHEN 'maybe' THEN 1
                            ELSE 0
+                       END) * MIN(CASE 
+                           WHEN p.is_dm = TRUE AND r.availability = 'no' THEN 0 
+                           ELSE 1 
                        END) as score
-                FROM responses
-                WHERE poll_id = %s
-                GROUP BY response_date
+                FROM responses r
+                JOIN players p ON r.player_id = p.id
+                WHERE r.poll_id = %s
+                GROUP BY r.response_date
                 ORDER BY score DESC
             ''', (poll['id'],))
             
