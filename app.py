@@ -5,17 +5,18 @@ import re
 import time
 import atexit
 import fcntl
+import mysql.connector
+import requests
+import pytz
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, abort
 from flask_wtf.csrf import CSRFProtect
-import mysql.connector
-from mysql.connector import pooling
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from werkzeug.middleware.proxy_fix import ProxyFix
-import requests
-import pytz
 from functools import wraps
+from icalendar import Calendar, Event
+from mysql.connector import pooling
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -301,6 +302,171 @@ def close_db_connection(exception):
 @login_required
 def admin_panel():
     return render_template('admin.html')
+    
+def generate_ics_file(campaign_name, session_number, selected_date, start_time, end_time, timezone_str):
+    """Generate an ICS calendar file for a D&D session"""
+    cal = Calendar()
+    cal.add('prodid', '-//Party Planner//D&D Session//EN')
+    cal.add('version', '2.0')
+    
+    event = Event()
+    event.add('summary', f"{campaign_name} - Session {session_number}")
+    event.add('description', f"D&D Session {session_number} for {campaign_name}")
+    
+    # Parse the date and times
+    tz = pytz.timezone(timezone_str)
+    
+    # Combine date with start time
+    if isinstance(start_time, timedelta):
+        total_seconds = int(start_time.total_seconds())
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        start_time_str = f"{hours:02d}:{minutes:02d}"
+    else:
+        start_time_str = start_time
+    
+    if isinstance(end_time, timedelta):
+        total_seconds = int(end_time.total_seconds())
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        end_time_str = f"{hours:02d}:{minutes:02d}"
+    else:
+        end_time_str = end_time
+    
+    # Create datetime objects
+    start_datetime = tz.localize(datetime.strptime(f"{selected_date} {start_time_str}", "%Y-%m-%d %H:%M"))
+    end_datetime = tz.localize(datetime.strptime(f"{selected_date} {end_time_str}", "%Y-%m-%d %H:%M"))
+    
+    event.add('dtstart', start_datetime)
+    event.add('dtend', end_datetime)
+    event.add('dtstamp', datetime.now(tz))
+    
+    cal.add_component(event)
+    
+    return cal.to_ical()
+
+def create_calendar_links(campaign_name, session_number, selected_date, start_time, end_time, timezone_str):
+    """Generate calendar links for Google Calendar and Outlook"""
+    # Parse times
+    if isinstance(start_time, timedelta):
+        total_seconds = int(start_time.total_seconds())
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        start_time_str = f"{hours:02d}:{minutes:02d}"
+    else:
+        start_time_str = start_time
+    
+    if isinstance(end_time, timedelta):
+        total_seconds = int(end_time.total_seconds())
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        end_time_str = f"{hours:02d}:{minutes:02d}"
+    else:
+        end_time_str = end_time
+    
+    # Create datetime objects
+    tz = pytz.timezone(timezone_str)
+    start_datetime = tz.localize(datetime.strptime(f"{selected_date} {start_time_str}", "%Y-%m-%d %H:%M"))
+    end_datetime = tz.localize(datetime.strptime(f"{selected_date} {end_time_str}", "%Y-%m-%d %H:%M"))
+    
+    # Format for URLs (ISO 8601)
+    start_iso = start_datetime.strftime('%Y%m%dT%H%M%S')
+    end_iso = end_datetime.strftime('%Y%m%dT%H%M%S')
+    
+    title = f"{campaign_name} - Session {session_number}"
+    
+    # Google Calendar URL
+    google_url = (
+        f"https://calendar.google.com/calendar/render?action=TEMPLATE"
+        f"&text={requests.utils.quote(title)}"
+        f"&dates={start_iso}/{end_iso}"
+        f"&ctz={timezone_str}"
+        f"&details={requests.utils.quote(f'D&D Session {session_number}')}"
+    )
+    
+    # Outlook URL (uses same format as Google)
+    outlook_url = (
+        f"https://outlook.live.com/calendar/0/deeplink/compose?path=/calendar/action/compose"
+        f"&subject={requests.utils.quote(title)}"
+        f"&startdt={start_datetime.isoformat()}"
+        f"&enddt={end_datetime.isoformat()}"
+        f"&body={requests.utils.quote(f'D&D Session {session_number}')}"
+    )
+    
+    return {
+        'google': google_url,
+        'outlook': outlook_url
+    }
+
+@app.route('/api/polls/<slug>/calendar.ics')
+def download_calendar(slug):
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute('''
+        SELECT p.*, c.name, c.session_time_start, c.session_time_end, c.timezone
+        FROM polls p
+        JOIN campaigns c ON p.campaign_id = c.id
+        WHERE p.slug = %s AND p.is_closed = TRUE AND p.selected_date IS NOT NULL
+    ''', (slug,))
+    
+    poll = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if not poll:
+        return jsonify({'error': 'Poll not found or not finalized'}), 404
+    
+    ics_data = generate_ics_file(
+        poll['name'],
+        poll['session_number'],
+        poll['selected_date'],
+        poll['session_time_start'],
+        poll['session_time_end'],
+        poll['timezone']
+    )
+    
+    from flask import Response
+    return Response(
+        ics_data,
+        mimetype='text/calendar',
+        headers={
+            'Content-Disposition': f'attachment; filename=dnd-session-{poll["session_number"]}.ics'
+        }
+    )
+
+@app.route('/api/polls/<slug>/calendar-links')
+@login_required
+def get_calendar_links(slug):
+    conn = get_db()
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute('''
+        SELECT p.*, c.name, c.session_time_start, c.session_time_end, c.timezone
+        FROM polls p
+        JOIN campaigns c ON p.campaign_id = c.id
+        WHERE p.slug = %s AND p.is_closed = TRUE AND p.selected_date IS NOT NULL
+    ''', (slug,))
+    
+    poll = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if not poll:
+        return jsonify({'error': 'Poll not found or not finalized'}), 404
+    
+    links = create_calendar_links(
+        poll['name'],
+        poll['session_number'],
+        poll['selected_date'],
+        poll['session_time_start'],
+        poll['session_time_end'],
+        poll['timezone']
+    )
+    
+    links['ics'] = f"{request.url_root}api/polls/{slug}/calendar.ics"
+    
+    return jsonify(links)
 
 @app.route('/poll/<slug>')
 @login_required
@@ -1036,8 +1202,6 @@ def close_poll(slug):
     poll_info = cursor.fetchone()
     
     if poll_info and poll_info['discord_webhook']:
-        # Generate the link URL
-        # We use request.url_root to ensure it matches the user's browser context
         poll_url = f"{request.url_root}poll/{slug}"
 
         if selected_date:
@@ -1057,10 +1221,31 @@ def close_poll(slug):
                 minutes = (total_seconds % 3600) // 60
                 end_time = f"{hours:02d}:{minutes:02d}"
             
+            # Generate calendar links
+            calendar_links = create_calendar_links(
+                poll_info['name'],
+                poll_info['session_number'],
+                selected_date,
+                start_time,
+                end_time,
+                poll_info['timezone']
+            )
+            
+            ics_url = f"{request.url_root}api/polls/{slug}/calendar.ics"
+            
+            # Build description with calendar links
+            description = (
+                f"**{poll_info['name']}** will meet on **{selected_date}** at {start_time}-{end_time} {poll_info['timezone']}\n\n"
+                f"**Add to Calendar:**\n"
+                f"📅 [Google Calendar]({calendar_links['google']})\n"
+                f"📆 [Outlook]({calendar_links['outlook']})\n"
+                f"💾 [Download ICS]({ics_url})"
+            )
+            
             send_discord_notification(
                 poll_info['discord_webhook'],
                 f"📅 Scheduled: {poll_info['name']} - Session {poll_info['session_number']}",
-                f"**{poll_info['name']}** will meet on **{selected_date}** at {start_time}-{end_time} {poll_info['timezone']}",
+                description,
                 poll_url
             )
         else:
@@ -1070,6 +1255,7 @@ def close_poll(slug):
                 f"No suitable date was found for Session {poll_info['session_number']}",
                 poll_url
             )
+    
     status = "Scheduled" if selected_date else "Cancelled"
     log_audit('POLL_CLOSE', f"Poll {slug} closed. Result: {status} ({selected_date})", 'poll', None)
     
@@ -1199,19 +1385,15 @@ def send_discord_notification(webhook_url, title, description, link=None):
         for attempt in range(3):
             response = requests.post(webhook_url, json=payload)
             
-            # If successful, we are done
             if response.status_code in [200, 204]:
                 log_audit('NOTIFICATION_SENT', f"Sent Discord notification: {title}", 'system', None)
                 return
             
-            # If rate limited (429), wait and retry
             if response.status_code == 429:
                 retry_after = response.json().get('retry_after', 1)
-                # printOutput 3 f"Rate limit hit. Waiting {retry_after}s..."
                 time.sleep(retry_after)
                 continue
             
-            # If other error, print and break
             print(f"Failed to send Discord notification: {response.status_code} - {response.text}")
             break
             

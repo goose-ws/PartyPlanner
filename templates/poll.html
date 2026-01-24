@@ -665,7 +665,12 @@
             
             if (poll.is_closed) {
                 if (poll.selected_date) {
-                    statusHtml = `<div class="info-row" style="color: #2e7d32; font-weight: 600;">✅ Scheduled for: ${poll.selected_date}</div>`;
+                    statusHtml = `
+                        <div class="info-row" style="color: #2e7d32; font-weight: 600;">✅ Scheduled for: ${poll.selected_date}</div>
+                        <div class="info-row" id="calendar-buttons-container" style="gap: 10px; display: flex; flex-wrap: wrap; margin-top: 10px;">
+                            <span style="color: #666; margin-right: 10px;">Add to calendar:</span>
+                        </div>
+                    `;
                 } else {
                     statusHtml = `<div class="info-row" style="color: #f44336; font-weight: 600;">🚫 Session Cancelled (No Date Selected)</div>`;
                 }
@@ -862,6 +867,7 @@
                     </button>
                 `;
             }
+            loadCalendarButtons();
         }
         
         function formatDate(dateStr) {
@@ -871,6 +877,33 @@
                 month: 'short', 
                 day: 'numeric' 
             });
+        }
+        
+        async function loadCalendarButtons() {
+            if (!pollData.poll.is_closed || !pollData.poll.selected_date) return;
+            
+            try {
+                const response = await fetch(`/api/polls/${pollSlug}/calendar-links`);
+                const links = await response.json();
+                
+                const container = document.getElementById('calendar-buttons-container');
+                if (container) {
+                    const buttonsHtml = `
+                        <a href="${links.google}" target="_blank" class="btn btn-primary" style="text-decoration: none;">
+                            📅 Google Calendar
+                        </a>
+                        <a href="${links.outlook}" target="_blank" class="btn btn-primary" style="text-decoration: none;">
+                            📆 Outlook
+                        </a>
+                        <a href="${links.ics}" download class="btn btn-primary" style="text-decoration: none;">
+                            💾 Download ICS
+                        </a>
+                    `;
+                    container.innerHTML += buttonsHtml;
+                }
+            } catch (error) {
+                console.error('Error loading calendar buttons:', error);
+            }
         }
         
         async function cancelSession() {
