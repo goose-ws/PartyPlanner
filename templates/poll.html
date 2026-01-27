@@ -574,6 +574,7 @@
     <div class="header">
         <h1 id="poll-title">🎲 Loading...</h1>
         <div style="display: flex; gap: 10px;">
+            <span style="color: #999; font-size: 0.8em; margin-right: 10px;">v{{ app_version }}</span>
             <button id="darkModeBtn" class="btn btn-secondary" onclick="toggleDarkMode()">🌙 Dark Mode</button>
             <button class="btn btn-secondary" onclick="window.location.href='/admin'">← Back to Admin</button>
         </div>
@@ -927,16 +928,13 @@
             // Check if row is locked
             const row = document.getElementById(`row-${playerId}`);
             if (row && row.classList.contains('locked')) {
-                // Optional: Shake animation or visual cue
                 return; 
             }
 
-            // Define the cycle (Removed 'null/clear')
+            // Define the cycle
             const cycle = ['yes', 'if_needed', 'maybe', 'no'];
             
             // Determine next status
-            // If currentStatus is null (Ghost), we start at 'yes'
-            // If currentStatus is 'no', we loop back to 'yes'
             let nextStatus = 'yes';
             
             if (currentStatus) {
@@ -947,13 +945,41 @@
                 }
             }
 
-            // Optimistic UI Update (Instant feedback)
-            // We can't easily find the specific cell without passing the element, 
-            // but the loadPoll() will fix it milliseconds later.
-            
             try {
-                // We ALWAYS use save_response now. No more delete_response.
-                await fetch('/api/responses', {
+                // --- NEW LOGIC: SMART DEFAULTS ---
+                const promises = [];
+
+                // Check if this player has ANY existing responses in the database
+                // If not, this is their "First Touch"
+                const hasPriorResponses = pollData.responses.some(r => r.player_id === playerId);
+
+                if (!hasPriorResponses) {
+                    console.log("First interaction detected! Auto-filling other dates as 'no'.");
+                    
+                    // Loop through all dates in the poll
+                    pollData.dates.forEach(d => {
+                        // Skip the date the user just clicked (that one is handled below)
+                        if (d !== dateStr) {
+                            // Queue a request to set this date to 'no'
+                            promises.push(fetch('/api/responses', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRFToken': csrfToken
+                                },
+                                body: JSON.stringify({
+                                    poll_id: pollData.poll.id,
+                                    player_id: playerId,
+                                    response_date: d,
+                                    availability: 'no'
+                                })
+                            }));
+                        }
+                    });
+                }
+                
+                // Add the MAIN request (the cell the user actually clicked)
+                promises.push(fetch('/api/responses', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -965,7 +991,10 @@
                         response_date: dateStr,
                         availability: nextStatus
                     })
-                });
+                }));
+                
+                // Execute all requests in parallel (much faster than sequential)
+                await Promise.all(promises);
                 
                 // Reload to reflect changes and update scores
                 loadPoll();

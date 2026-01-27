@@ -21,7 +21,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-APP_VERSION = '1.1.0'
+APP_VERSION = '1.1.1'
 @app.context_processor
 def inject_version():
     return dict(app_version=APP_VERSION)
