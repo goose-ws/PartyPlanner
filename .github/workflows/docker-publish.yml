@@ -3,8 +3,7 @@ name: Create and Publish Docker Image
 on:
   push:
     branches: ['main']
-    # Trigger on version tags
-    tags: [ 'v*.*.*' ]
+    tags: [ 'v*.*.*' ] 
 
 env:
   REGISTRY: ghcr.io
@@ -33,12 +32,13 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          # Logic to handle 'latest', semver tags, and sha
           tags: |
+            # Tag 'latest' only if pushing to main branch
             type=raw,value=latest,enable={{is_default_branch}}
+            # Use the git tag (e.g. v1.0.0) as the docker tag
             type=ref,event=tag
+            # Always tag with the commit SHA for debugging
             type=sha
-            type=raw,value=1.0.0
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
