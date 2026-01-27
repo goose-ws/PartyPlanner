@@ -496,13 +496,7 @@
                 
                 <div class="form-group">
                     <label>Timezone</label>
-                    <select id="campaign-timezone" required>
-                        <option value="America/New_York">Eastern Time</option>
-                        <option value="America/Chicago">Central Time</option>
-                        <option value="America/Denver">Mountain Time</option>
-                        <option value="America/Los_Angeles">Pacific Time</option>
-                        <option value="UTC">UTC</option>
-                    </select>
+                    <select id="campaign-timezone" required></select>
                 </div>
                 
                 <div class="form-group">
@@ -567,6 +561,56 @@
         let currentCampaignId = null;
         let players = [];
         
+        const timezones = [
+            { value: "Etc/GMT+12", label: "(UTC-12:00) International Date Line West" },
+            { value: "Pacific/Midway", label: "(UTC-11:00) Midway Island, Samoa" },
+            { value: "Pacific/Honolulu", label: "(UTC-10:00) Hawaii" },
+            { value: "America/Anchorage", label: "(UTC-09:00) Alaska" },
+            { value: "America/Los_Angeles", label: "(UTC-08:00) Pacific Time (US & Canada)" },
+            { value: "America/Denver", label: "(UTC-07:00) Mountain Time (US & Canada)" },
+            { value: "America/Chicago", label: "(UTC-06:00) Central Time (US & Canada)" },
+            { value: "America/New_York", label: "(UTC-05:00) Eastern Time (US & Canada)" },
+            { value: "America/Halifax", label: "(UTC-04:00) Atlantic Time (Canada)" },
+            { value: "America/St_Johns", label: "(UTC-03:30) Newfoundland" },
+            { value: "America/Argentina/Buenos_Aires", label: "(UTC-03:00) Buenos Aires" },
+            { value: "America/Noronha", label: "(UTC-02:00) Mid-Atlantic" },
+            { value: "Atlantic/Azores", label: "(UTC-01:00) Azores" },
+            { value: "UTC", label: "(UTC+00:00) UTC" },
+            { value: "Europe/London", label: "(UTC+00:00) London, Edinburgh, Dublin" },
+            { value: "Europe/Paris", label: "(UTC+01:00) Amsterdam, Berlin, Rome, Paris" },
+            { value: "Europe/Helsinki", label: "(UTC+02:00) Helsinki, Kiev, Riga, Sofia" },
+            { value: "Europe/Moscow", label: "(UTC+03:00) Moscow, St. Petersburg, Volgograd" },
+            { value: "Asia/Dubai", label: "(UTC+04:00) Abu Dhabi, Muscat" },
+            { value: "Asia/Kabul", label: "(UTC+04:30) Kabul" },
+            { value: "Asia/Karachi", label: "(UTC+05:00) Islamabad, Karachi" },
+            { value: "Asia/Kolkata", label: "(UTC+05:30) Chennai, Kolkata, Mumbai, New Delhi" },
+            { value: "Asia/Kathmandu", label: "(UTC+05:45) Kathmandu" },
+            { value: "Asia/Dhaka", label: "(UTC+06:00) Almaty, Novosibirsk" },
+            { value: "Asia/Bangkok", label: "(UTC+07:00) Bangkok, Hanoi, Jakarta" },
+            { value: "Asia/Hong_Kong", label: "(UTC+08:00) Beijing, Hong Kong, Singapore" },
+            { value: "Asia/Tokyo", label: "(UTC+09:00) Osaka, Sapporo, Tokyo" },
+            { value: "Australia/Adelaide", label: "(UTC+09:30) Adelaide" },
+            { value: "Australia/Sydney", label: "(UTC+10:00) Canberra, Melbourne, Sydney" },
+            { value: "Pacific/Noumea", label: "(UTC+11:00) Solomon Is., New Caledonia" },
+            { value: "Pacific/Auckland", label: "(UTC+12:00) Auckland, Wellington" },
+            { value: "Pacific/Tongatapu", label: "(UTC+13:00) Nuku'alofa" },
+            { value: "Pacific/Kiritimati", label: "(UTC+14:00) Kiritimati" }
+        ];
+
+        function populateTimezones() {
+            const select = document.getElementById('campaign-timezone');
+            // Check if element exists to avoid errors on pages without the modal
+            if(select) {
+                select.innerHTML = timezones.map(tz => 
+                    `<option value="${tz.value}">${tz.label}</option>`
+                ).join('');
+                select.value = "UTC"; 
+            }
+        }
+        
+        // Call it immediately
+        populateTimezones();
+        
         function escapeHtml(text) {
             if (!text) return text;
             return text
@@ -613,7 +657,7 @@
                         ${campaign.is_active ? 'ACTIVE' : 'Inactive'}
                     </span>
                     <div class="campaign-name">${escapeHtml(campaign.name)}</div>
-                    <div class="campaign-info">👥 ${campaign.player_count} players</div>
+                    ${countdownHtml} <div class="campaign-info">👥 ${campaign.player_count} players</div>
                     <div class="campaign-info">📊 ${campaign.active_polls} active polls</div>
                     <div class="campaign-info">📅 Every ${campaign.recurrence_days} days</div>
                     <div class="campaign-info">🕐 ${campaign.session_time_start} - ${campaign.session_time_end}</div>
