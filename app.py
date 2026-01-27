@@ -8,6 +8,8 @@ import fcntl
 import mysql.connector
 import requests
 import pytz
+import logging
+import traceback
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from datetime import datetime, timedelta
@@ -17,11 +19,19 @@ from functools import wraps
 from icalendar import Calendar, Event
 from mysql.connector import pooling
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import HTTPException
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
-APP_VERSION = '1.1.1'
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+APP_VERSION = '1.1.2'
 @app.context_processor
 def inject_version():
     return dict(app_version=APP_VERSION)
@@ -270,6 +280,27 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Pass through standard HTTP errors (like 404, 403) so they render normally
+    if isinstance(e, HTTPException):
+        return e
+
+    # LOG THE ANOMALY: This writes the full stack trace to your container logs
+    logger.error(f"🔥 UNHANDLED EXCEPTION: {str(e)}")
+    logger.error(traceback.format_exc())
+
+    # Return JSON if it's an API call (so the frontend doesn't just hang)
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'success': False,
+            'error': 'Internal Server Error', 
+            'details': str(e) # Optional: remove 'details' in production if sensitive
+        }), 500
+    
+    # Otherwise return a generic error page/text
+    return "Internal Server Error (The administrator has been notified in the logs)", 500
+
 @app.route('/')
 def index():
     return redirect(url_for('admin_panel'))
@@ -297,6 +328,31 @@ def login():
 def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
+
+@app.route('/health')
+def health_check():
+    status = {
+        'status': 'ok', 
+        'database': 'unknown', 
+        'timestamp': datetime.now().isoformat(),
+        'version': APP_VERSION # Uses the variable we added earlier
+    }
+    
+    try:
+        # Test DB connection specifically
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        cursor.close()
+        conn.close()
+        status['database'] = 'connected'
+        return jsonify(status), 200
+    except Exception as e:
+        status['status'] = 'error'
+        status['database'] = str(e)
+        # Log this failure specifically
+        logger.error(f"Health check failed: {e}")
+        return jsonify(status), 500
     
 # Close DB connection automatically at the end of every request
 @app.teardown_appcontext
