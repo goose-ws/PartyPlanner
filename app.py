@@ -568,6 +568,39 @@ def get_campaigns():
         cursor.execute('SELECT COUNT(*) as count FROM polls WHERE campaign_id = %s AND is_closed = FALSE', (campaign['id'],))
         campaign['active_polls'] = cursor.fetchone()['count']
     
+        try:
+            # Use campaign timezone for accurate "today"
+            tz = pytz.timezone(campaign['timezone'])
+            today = datetime.now(tz).date()
+            
+            cursor.execute('''
+                SELECT session_number, selected_date 
+                FROM polls 
+                WHERE campaign_id = %s 
+                AND is_closed = TRUE 
+                AND selected_date >= %s 
+                ORDER BY selected_date ASC 
+                LIMIT 1
+            ''', (campaign['id'], today))
+            
+            next_session = cursor.fetchone()
+            
+            if next_session:
+                # Calculate days difference
+                session_date = next_session['selected_date']
+                # Ensure we have a date object (connector might return string or date)
+                if isinstance(session_date, str):
+                    session_date = datetime.strptime(session_date, '%Y-%m-%d').date()
+                
+                days_until = (session_date - today).days
+                
+                campaign['next_session_countdown'] = {
+                    'days': days_until,
+                    'session_number': next_session['session_number']
+                }
+        except Exception as e:
+            print(f"Error calculating countdown for campaign {campaign['id']}: {e}")
+    
     cursor.close()
     conn.close()
     return jsonify(campaigns)
@@ -1233,9 +1266,16 @@ def close_poll(slug):
             
             ics_url = f"{request.url_root}api/polls/{slug}/calendar.ics"
             
-            # Build description with calendar links
+            # Calculate days until
+            tz = pytz.timezone(poll_info['timezone'])
+            today = datetime.now(tz).date()
+            target_date = datetime.strptime(selected_date, '%Y-%m-%d').date()
+            days_until = (target_date - today).days
+            days_str = "day" if days_until == 1 else "days"
+            
             description = (
-                f"**{poll_info['name']}** will meet on **{selected_date}** at {start_time}-{end_time} {poll_info['timezone']}\n\n"
+                f"**{poll_info['name']}** will meet on **{selected_date}** at {start_time}-{end_time} {poll_info['timezone']}\n"
+                f"⏳ **{days_until} {days_str} until Session {poll_info['session_number']}**\n\n"
                 f"**Add to Calendar:**\n"
                 f"📅 [Google Calendar]({calendar_links['google']})\n"
                 f"📆 [Outlook]({calendar_links['outlook']})\n"

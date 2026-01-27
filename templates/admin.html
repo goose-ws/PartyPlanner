@@ -593,6 +593,20 @@
                 const card = document.createElement('div');
                 card.className = `campaign-card ${campaign.is_active ? 'active' : ''}`;
                 
+                let countdownHtml = '';
+                if (campaign.next_session_countdown) {
+                    const days = campaign.next_session_countdown.days;
+                    const sessNum = campaign.next_session_countdown.session_number;
+                    const dayLabel = days === 1 ? 'day' : 'days';
+                    
+                    // Different styling for "Today" (0 days) vs future
+                    const text = days === 0 
+                        ? `🚀 Session ${sessNum} is TODAY!` 
+                        : `⏳ ${days} ${dayLabel} until Session ${sessNum}`;
+                        
+                    countdownHtml = `<div class="campaign-info" style="color: #667eea; font-weight: 700; margin-top: 10px;">${text}</div>`;
+                }
+                
                 // SECURITY UPDATE: escapeHtml() added to name
                 card.innerHTML = `
                     <span class="campaign-badge ${campaign.is_active ? 'badge-active' : 'badge-inactive'}">
