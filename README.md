@@ -85,7 +85,18 @@ docker compose up -d
 * **Deadlines**:
 * *Response Warning*: How many days before the session to ping non-responders.
 * *Decision Deadline*: How many days before the session to announce the best date.
+* **Discord Webhook**: The URL for the channel where the bot should post.
 
+### Discord Pings (Optional)
+
+When adding players to a campaign, you can optionally provide their **Discord User ID**.
+
+* **Purpose**: If a Discord ID is provided, the automated reminder notifications will **ping (@mention)** that specific user directly in Discord if they haven't voted yet. If no ID is provided, it will just list their name as plain text.
+* **How to get a Discord ID**:
+    1. Open Discord **Settings** → **Advanced** → Enable **Developer Mode**.
+    2. Right-click on a user's profile (or their name in chat/member list).
+    3. Select **Copy User ID**.
+    4. Paste this numeric ID (e.g., `123456789012345678`) into the "Discord ID" field in Party Planner.
 
 * **Discord Webhook**: The URL for the channel where the bot should post.
 
