@@ -31,7 +31,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-APP_VERSION = '1.1.3'
+APP_VERSION = '1.1.4'
 @app.context_processor
 def inject_version():
     return dict(app_version=APP_VERSION)
