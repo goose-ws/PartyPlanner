@@ -31,7 +31,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-APP_VERSION = '1.1.2'
+APP_VERSION = '1.1.3'
 @app.context_processor
 def inject_version():
     return dict(app_version=APP_VERSION)
@@ -1761,12 +1761,8 @@ def start_scheduler():
         # If we made it here, we are the only worker with the lock
         scheduler = BackgroundScheduler()
         
-        # 1. Daily Poll Creation (Fixed)
-        scheduler.add_job(check_and_create_polls, CronTrigger(hour=0, minute=0))
-        
-        # 2. Notification Check (Configurable)
         # Default: Minute 0 of every 6th hour (0, 6, 12, 18)
-        notification_trigger = CronTrigger(hour='*/6', minute=0)
+        trigger = CronTrigger(hour='*/6', minute=0)
         
         custom_cron = os.environ.get('NOTIFICATION_CRON')
         
@@ -1777,14 +1773,19 @@ def start_scheduler():
                     raise ValueError("Schedule must use strict 5-field format (min hour day month dow)")
                 
                 # Attempt to parse
-                notification_trigger = CronTrigger.from_crontab(custom_cron)
-                print(f"✅ Scheduler: Using custom notification schedule: '{custom_cron}'")
+                trigger = CronTrigger.from_crontab(custom_cron)
+                print(f"✅ Scheduler: Using custom schedule: '{custom_cron}'")
                 
             except Exception as e:
                 print(f"⚠️ Scheduler: Invalid NOTIFICATION_CRON '{custom_cron}'. Error: {e}")
                 print(f"ℹ️ Scheduler: Reverting to default (Every 6 hours).")
         
-        scheduler.add_job(check_notifications, notification_trigger)
+        # 1. Poll Creation (Now follows the schedule)
+        scheduler.add_job(check_and_create_polls, trigger)
+        
+        # 2. Notification Check (Now follows the schedule)
+        scheduler.add_job(check_notifications, trigger)
+        
         scheduler.start()
 
         print("✅ Scheduler started in this worker.")
