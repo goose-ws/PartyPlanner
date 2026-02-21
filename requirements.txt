@@ -7,4 +7,4 @@ python-dateutil==2.9.0.post0
 pytz==2025.2
 Werkzeug==3.1.5
 gunicorn==25.0.1
-icalendar==6.3.2
+icalendar==7.0.0
