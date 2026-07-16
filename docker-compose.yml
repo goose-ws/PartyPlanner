@@ -1,0 +1,55 @@
+# This is written as a standalone compose file for local `docker compose up`
+# during development on Vergil. For prod on Bucket, merge the `partyplanner`
+# service block below into your existing nginx compose file (same file =
+# same default network = nginx can reach it by service name, no published
+# ports needed). Drop the `networks:` section here if you do that, since
+# it'll already be on nginx's default network.
+
+services:
+  partyplanner:
+    # Swap for ghcr.io/<you>/partyplanner:<tag> once the image is built & pushed.
+    build: .
+    container_name: partyplanner
+    restart: unless-stopped
+    # No ports: published — nginx reaches this over the shared docker network
+    # by service name (see the reverse-proxy example in the README). Uncomment
+    # for standalone local testing without nginx in front:
+    # ports:
+    #   - "127.0.0.1:3000:3000"
+    volumes:
+      - partyplanner_data:/app/data   # persists config.json (non-secret settings) + legacy JSON exports
+    environment:
+      - PORT=3000
+      - PUBLIC_URL=https://partyplanner.vergil.goose.ws   # update per host (Vergil vs Bucket)
+      - TRUST_PROXY=true
+      - CONFIG_PATH=/app/data/config.json
+      - LEGACY_EXPORT_DIR=/app/data/legacy-exports
+
+      # --- MariaDB (external, already running) ---
+      - DB_HOST=host.docker.internal   # or the mariadb container's service name if it's on this network
+      - DB_PORT=3306
+      - DB_USER=partyplanner_user
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=partyplanner
+
+      # --- Discord OAuth ---
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET}
+      # Only needed for the very first boot — gets persisted into config.json
+      # afterwards, so you can delete this line from your .env post-setup.
+      - INITIAL_ROOT_DISCORD_ID=${INITIAL_ROOT_DISCORD_ID}
+
+      # --- Secrets: required every boot, never persisted to disk ---
+      - SESSION_SIGNING_SECRET=${SESSION_SIGNING_SECRET}   # openssl rand -hex 32
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}         # openssl rand -hex 32
+
+      # --- Optional: invite emails via SMTP. Omit all four to disable. ---
+      # - SMTP_HOST=smtp.example.com
+      # - SMTP_PORT=587
+      # - SMTP_USER=apikey
+      # - SMTP_PASSWORD=${SMTP_PASSWORD}
+      # - SMTP_FROM=Party Planner <no-reply@example.com>
+
+volumes:
+  partyplanner_config:
+  partyplanner_data:
