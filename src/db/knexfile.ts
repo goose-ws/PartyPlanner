@@ -1,5 +1,17 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Knex } from "knex";
 import type { AppConfig } from "../types/config.js";
+
+// Resolve relative to this file's own location, not process.cwd() — knex
+// otherwise resolves `directory` relative to the process's working
+// directory, which in the container is /app, not /app/dist/db. Also pick
+// the migration file extension based on how *this* file is being run:
+// tsx (dev, src/db/knexfile.ts, .ts migrations) vs compiled node (prod,
+// dist/db/knexfile.js, .js migrations).
+const currentDir = path.dirname(fileURLToPath(import.meta.url));
+const isRunningFromSource = import.meta.url.endsWith(".ts");
+const migrationExtension = isRunningFromSource ? "ts" : "js";
 
 // Minimal shape we need from mysql2's typeCast field callback — avoided a
 // direct type import since mysql2's package.json restricts deep subpath
@@ -30,9 +42,10 @@ export function buildKnexConfig(cfg: AppConfig): Knex.Config {
     },
     pool: { min: 1, max: 10 },
     migrations: {
-      directory: "./migrations",
+      directory: path.join(currentDir, "migrations"),
       tableName: "knex_migrations",
-      extension: "ts",
+      extension: migrationExtension,
+      loadExtensions: [`.${migrationExtension}`],
     },
   };
 }
