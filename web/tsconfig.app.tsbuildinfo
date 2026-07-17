@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/components/CampaignCard.tsx","./src/components/Logo.tsx","./src/components/RoleBadge.tsx","./src/components/TopBar.tsx","./src/hooks/useAuth.ts","./src/pages/CampaignDetail.tsx","./src/pages/Home.tsx"],"version":"5.9.3"}

@@ -44,5 +44,29 @@ export function campaignsRouter(): Router {
     res.json({ campaigns });
   });
 
+  // Single campaign — root or any member of it.
+  router.get("/campaigns/:campaignId", requireAuth, async (req, res) => {
+    const campaign = await db()("campaigns").where({ id: req.params.campaignId }).first();
+    if (!campaign) {
+      res.status(404).json({ error: "campaign_not_found" });
+      return;
+    }
+
+    if (req.user!.globalRole === "root") {
+      res.json({ campaign });
+      return;
+    }
+
+    const membership = await db()("campaign_members")
+      .where({ campaign_id: campaign.id, discord_id: req.user!.discordId })
+      .first();
+    if (!membership) {
+      res.status(403).json({ error: "not_a_campaign_member" });
+      return;
+    }
+
+    res.json({ campaign: { ...campaign, myRole: membership.role } });
+  });
+
   return router;
 }

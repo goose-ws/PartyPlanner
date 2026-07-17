@@ -1,6 +1,8 @@
 import express from "express";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { initDb } from "./db/index.js";
 import { sessionMiddleware } from "./middleware/session.js";
@@ -28,8 +30,21 @@ app.use("/auth", authRouter(cfg));
 app.use("/", invitesRouter(cfg)); // mounts both /campaigns/:id/invites and the public /invite/:token
 app.use("/", campaignsRouter());
 
-// Static SPA build (added once the frontend exists) will be served from here,
-// with a catch-all falling through to index.html for client-side routing.
+// --- Static SPA ---
+// Resolved relative to this compiled file's own location (dist/server.js ->
+// ../web/dist), not process.cwd() — see the knexfile.ts migration-path bug
+// for why that distinction matters in this container.
+const webDistDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../web/dist");
+const API_PREFIXES = ["/auth", "/invite/", "/campaigns", "/healthz"];
+
+app.use(express.static(webDistDir));
+app.get("*", (req, res) => {
+  if (API_PREFIXES.some((p) => req.path.startsWith(p))) {
+    res.status(404).json({ error: "not_found" });
+    return;
+  }
+  res.sendFile(path.join(webDistDir, "index.html"));
+});
 
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error("[server] Unhandled error:", err);

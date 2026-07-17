@@ -1,10 +1,18 @@
-# --- Build stage ---
-FROM node:20-alpine AS build
+# --- Backend build stage ---
+FROM node:20-alpine AS build-backend
 WORKDIR /build
 COPY package.json package-lock.json* ./
 RUN npm install
 COPY tsconfig.json ./
 COPY src ./src
+RUN npm run build
+
+# --- Frontend build stage ---
+FROM node:20-alpine AS build-frontend
+WORKDIR /build
+COPY web/package.json web/package-lock.json* ./
+RUN npm install
+COPY web/ ./
 RUN npm run build
 
 # --- Runtime stage ---
@@ -15,7 +23,8 @@ ENV NODE_ENV=production
 COPY package.json package-lock.json* ./
 RUN npm install --omit=dev && npm cache clean --force
 
-COPY --from=build /build/dist ./dist
+COPY --from=build-backend /build/dist ./dist
+COPY --from=build-frontend /build/dist ./web/dist
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 

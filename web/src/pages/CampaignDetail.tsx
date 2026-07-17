@@ -1,0 +1,199 @@
+import { useEffect, useState } from "react";
+import { useParams, Link } from "react-router-dom";
+import { api, ApiError, type Campaign, type Invite, type AuthedUser } from "../api";
+
+function InviteRow({ invite, onRevoke }: { invite: Invite; onRevoke: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const isDead = !!invite.revokedAt || (invite.expiresAt && new Date(invite.expiresAt) < new Date());
+
+  return (
+    <div
+      className="pp-card"
+      style={{
+        padding: "14px 16px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        opacity: isDead ? 0.5 : 1,
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div className="pp-mono" style={{ fontSize: 13, wordBreak: "break-all" }}>
+          {invite.url}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--pp-ink-soft)", marginTop: 4 }}>
+          {invite.role} invite · used {invite.uses}
+          {invite.maxUses !== null ? `/${invite.maxUses}` : ""} times
+          {invite.expiresAt ? ` · expires ${new Date(invite.expiresAt).toLocaleDateString()}` : ""}
+          {invite.revokedAt ? " · revoked" : ""}
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+        <button
+          className="pp-btn pp-btn-ghost"
+          onClick={() => {
+            navigator.clipboard.writeText(invite.url);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+        {!isDead && (
+          <button className="pp-btn pp-btn-danger" onClick={onRevoke}>
+            Revoke
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InviteManager({ campaignId, canGrantDm }: { campaignId: string; canGrantDm: boolean }) {
+  const [invites, setInvites] = useState<Invite[] | null>(null);
+  const [role, setRole] = useState<"Player" | "DM">("Player");
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    api
+      .listInvites(campaignId)
+      .then(({ invites }) => setInvites(invites))
+      .catch(() => setError("Couldn't load invites."));
+  }
+
+  useEffect(load, [campaignId]);
+
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api.createInvite(campaignId, { role, email: email.trim() || undefined });
+      setEmail("");
+      load();
+    } catch {
+      setError("Couldn't create the invite.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke(token: string) {
+    await api.revokeInvite(campaignId, token);
+    load();
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <h2 style={{ fontSize: 17 }}>Invites</h2>
+
+      <form onSubmit={create} className="pp-card" style={{ padding: 18, display: "grid", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: canGrantDm ? "auto 1fr auto" : "1fr auto", gap: 12, alignItems: "end" }}>
+          {canGrantDm && (
+            <div className="pp-field">
+              <label htmlFor="invite-role">Role</label>
+              <select
+                id="invite-role"
+                className="pp-select"
+                value={role}
+                onChange={(e) => setRole(e.target.value as "Player" | "DM")}
+              >
+                <option value="Player">Player</option>
+                <option value="DM">DM</option>
+              </select>
+            </div>
+          )}
+          <div className="pp-field">
+            <label htmlFor="invite-email">Email (optional)</label>
+            <input
+              id="invite-email"
+              type="email"
+              className="pp-input"
+              placeholder="Only if you want it emailed"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <button className="pp-btn pp-btn-primary" disabled={busy} type="submit">
+            {busy ? "Creating…" : "Create link"}
+          </button>
+        </div>
+        {error && <p style={{ color: "var(--pp-crimson)", fontSize: 13 }}>{error}</p>}
+      </form>
+
+      {invites === null && <p>Loading invites…</p>}
+      {invites?.length === 0 && (
+        <div className="pp-empty">
+          <p>No invites yet. Create one above to bring in a player.</p>
+        </div>
+      )}
+      <div style={{ display: "grid", gap: 8 }}>
+        {invites?.map((inv) => (
+          <InviteRow key={inv.token} invite={inv} onRevoke={() => revoke(inv.token)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const CADENCE_LABEL: Record<Campaign["cadence_type"], string> = {
+  "bi-weekly": "Every 2 weeks",
+  custom_interval: "Custom interval",
+  weekly_static: "Weekly",
+};
+
+export function CampaignDetail({ user }: { user: AuthedUser }) {
+  const { campaignId } = useParams<{ campaignId: string }>();
+  const [campaign, setCampaign] = useState<Campaign | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!campaignId) return;
+    api
+      .getCampaign(campaignId)
+      .then(({ campaign }) => setCampaign(campaign))
+      .catch((err) =>
+        setError(err instanceof ApiError && err.status === 403 ? "You're not part of this campaign." : "Campaign not found.")
+      );
+  }, [campaignId]);
+
+  if (error) {
+    return (
+      <div className="pp-empty">
+        <p>{error}</p>
+        <Link to="/" className="pp-btn pp-btn-ghost" style={{ marginTop: 16 }}>
+          Back to campaigns
+        </Link>
+      </div>
+    );
+  }
+
+  if (!campaign || !campaignId) return <p>Loading…</p>;
+
+  const canManageInvites = user.globalRole === "root" || campaign.myRole === "DM";
+
+  return (
+    <div style={{ display: "grid", gap: 32 }}>
+      <div>
+        <Link to="/" style={{ fontSize: 13, color: "var(--pp-ink-soft)", textDecoration: "none" }}>
+          ← All campaigns
+        </Link>
+        <h1 style={{ fontSize: 24, marginTop: 8 }}>{campaign.name}</h1>
+        <p className="pp-mono" style={{ fontSize: 12.5, marginTop: 6 }}>
+          {CADENCE_LABEL[campaign.cadence_type]} · anchored {campaign.start_date}
+        </p>
+      </div>
+
+      {canManageInvites ? (
+        <InviteManager campaignId={campaignId} canGrantDm={user.globalRole === "root"} />
+      ) : (
+        <div className="pp-empty">
+          <p>The scheduling grid for this campaign isn't built yet — check back soon.</p>
+        </div>
+      )}
+    </div>
+  );
+}
