@@ -9,6 +9,8 @@ import { sessionMiddleware } from "./middleware/session.js";
 import { authPageRouter, authApiRouter } from "./routes/auth.js";
 import { campaignsRouter } from "./routes/campaigns.js";
 import { invitesApiRouter, invitePageRouter } from "./routes/invites.js";
+import { availabilityRouter } from "./routes/availability.js";
+import { schedulingRouter } from "./routes/scheduling.js";
 
 const cfg = loadConfig();
 initDb(cfg); // migrations already ran as a separate boot step — see src/db/migrate.ts / entrypoint.sh
@@ -38,6 +40,8 @@ app.use("/", invitePageRouter());
 app.use("/api/auth", authApiRouter(cfg));
 app.use("/api", invitesApiRouter(cfg));
 app.use("/api", campaignsRouter());
+app.use("/api", availabilityRouter());
+app.use("/api", schedulingRouter(cfg));
 
 // --- Static SPA ---
 // Resolved relative to this compiled file's own location (dist/server.js ->

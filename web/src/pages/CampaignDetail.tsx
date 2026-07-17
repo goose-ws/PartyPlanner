@@ -205,6 +205,103 @@ function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boo
   );
 }
 
+function SettingsPanel({ campaign, onUpdated }: { campaign: Campaign; onUpdated: (c: Campaign) => void }) {
+  const [open, setOpen] = useState(false);
+  const [start, setStart] = useState(campaign.session_time_start.slice(0, 5));
+  const [end, setEnd] = useState(campaign.session_time_end.slice(0, 5));
+  const [timezone, setTimezone] = useState(campaign.timezone);
+  const [intervalWeeks, setIntervalWeeks] = useState(campaign.interval_weeks);
+  const [sessionsPerInterval, setSessionsPerInterval] = useState(campaign.sessions_per_interval);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await api.updateCampaign(campaign.id, {
+        sessionTimeStart: start,
+        sessionTimeEnd: end,
+        timezone,
+        intervalWeeks,
+        sessionsPerInterval,
+      });
+      onUpdated(updated);
+      setOpen(false);
+    } catch {
+      setError("Couldn't save — check the values and try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button className="pp-btn pp-btn-ghost" onClick={() => setOpen(true)} style={{ justifySelf: "start" }}>
+        Edit settings
+      </button>
+    );
+  }
+
+  return (
+    <form onSubmit={save} className="pp-card" style={{ padding: 18, display: "grid", gap: 14 }}>
+      <h3 style={{ fontSize: 15 }}>Campaign settings</h3>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="pp-field">
+          <label htmlFor="s-start">Session start</label>
+          <input id="s-start" type="time" className="pp-input" value={start} onChange={(e) => setStart(e.target.value)} />
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-end">Session end</label>
+          <input id="s-end" type="time" className="pp-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+        </div>
+        <div className="pp-field" style={{ gridColumn: "1 / -1" }}>
+          <label htmlFor="s-tz">Timezone (IANA name)</label>
+          <input
+            id="s-tz"
+            className="pp-input"
+            value={timezone}
+            onChange={(e) => setTimezone(e.target.value)}
+            placeholder="America/New_York"
+          />
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-interval">Block length (weeks)</label>
+          <input
+            id="s-interval"
+            type="number"
+            min={1}
+            className="pp-input"
+            value={intervalWeeks}
+            onChange={(e) => setIntervalWeeks(Number(e.target.value))}
+          />
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-per">Sessions per block</label>
+          <input
+            id="s-per"
+            type="number"
+            min={1}
+            className="pp-input"
+            value={sessionsPerInterval}
+            onChange={(e) => setSessionsPerInterval(Number(e.target.value))}
+          />
+        </div>
+      </div>
+      {error && <p style={{ color: "var(--pp-crimson)", fontSize: 13 }}>{error}</p>}
+      <div style={{ display: "flex", gap: 10 }}>
+        <button className="pp-btn pp-btn-primary" disabled={busy} type="submit">
+          {busy ? "Saving…" : "Save"}
+        </button>
+        <button className="pp-btn pp-btn-ghost" type="button" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 const CADENCE_LABEL: Record<Campaign["cadence_type"], string> = {
   "bi-weekly": "Every 2 weeks",
   custom_interval: "Custom interval",
@@ -249,9 +346,12 @@ export function CampaignDetail({ user }: { user: AuthedUser }) {
         </Link>
         <h1 style={{ fontSize: 24, marginTop: 8 }}>{campaign.name}</h1>
         <p className="pp-mono" style={{ fontSize: 12.5, marginTop: 6 }}>
-          {CADENCE_LABEL[campaign.cadence_type]} · anchored {campaign.start_date}
+          {CADENCE_LABEL[campaign.cadence_type]} · anchored {campaign.start_date} · {campaign.session_time_start.slice(0, 5)}–
+          {campaign.session_time_end.slice(0, 5)} {campaign.timezone}
         </p>
       </div>
+
+      {user.globalRole === "root" && <SettingsPanel campaign={campaign} onUpdated={setCampaign} />}
 
       {canManageInvites ? (
         <>

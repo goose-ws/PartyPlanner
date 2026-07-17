@@ -12,6 +12,10 @@ export interface Campaign {
   cadence_type: "bi-weekly" | "custom_interval" | "weekly_static";
   interval_weeks: number;
   sessions_per_interval: number;
+  blackout_days_after_lock: number;
+  session_time_start: string;
+  session_time_end: string;
+  timezone: string;
   myRole?: "DM" | "Player";
 }
 
@@ -52,6 +56,19 @@ export const api = {
   getCampaign: (id: string) => request<{ campaign: Campaign }>(`/api/campaigns/${id}`),
   createCampaign: (input: { name: string; startDate: string }) =>
     request<Campaign>("/api/campaigns", { method: "POST", body: JSON.stringify(input) }),
+  updateCampaign: (
+    id: string,
+    input: Partial<{
+      name: string;
+      sessionTimeStart: string;
+      sessionTimeEnd: string;
+      timezone: string;
+      cadenceType: Campaign["cadence_type"];
+      intervalWeeks: number;
+      sessionsPerInterval: number;
+      blackoutDaysAfterLock: number;
+    }>
+  ) => request<Campaign>(`/api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
 
   listMembers: (campaignId: string) =>
     request<{ members: { discord_id: string; username: string; role: "DM" | "Player" }[] }>(

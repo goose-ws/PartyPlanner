@@ -32,6 +32,12 @@ export function buildKnexConfig(cfg: AppConfig): Knex.Config {
       user: cfg.db.user,
       password: cfg.db.password,
       database: cfg.db.database,
+      // DATE/DATETIME/TIMESTAMP columns come back as plain strings instead
+      // of JS Date objects — Date objects carry an implicit timezone
+      // interpretation that has no business anywhere near day-level
+      // availability scoring. The scheduling engine treats all of these as
+      // strings throughout.
+      dateStrings: true,
       typeCast: function (field: TypeCastField, next: TypeCastNext) {
         // Return TINYINT(1) as boolean instead of 0/1, matches MariaDB's BOOLEAN alias.
         if (field.type === "TINY" && field.length === 1) {
