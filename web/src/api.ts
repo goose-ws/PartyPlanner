@@ -45,21 +45,31 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  me: () => request<{ user: AuthedUser }>("/auth/me"),
-  logout: () => request<void>("/auth/logout", { method: "POST" }),
+  me: () => request<{ user: AuthedUser }>("/api/auth/me"),
+  logout: () => request<void>("/api/auth/logout", { method: "POST" }),
 
-  listCampaigns: () => request<{ campaigns: Campaign[] }>("/campaigns"),
-  getCampaign: (id: string) => request<{ campaign: Campaign }>(`/campaigns/${id}`),
+  listCampaigns: () => request<{ campaigns: Campaign[] }>("/api/campaigns"),
+  getCampaign: (id: string) => request<{ campaign: Campaign }>(`/api/campaigns/${id}`),
   createCampaign: (input: { name: string; startDate: string }) =>
-    request<Campaign>("/campaigns", { method: "POST", body: JSON.stringify(input) }),
+    request<Campaign>("/api/campaigns", { method: "POST", body: JSON.stringify(input) }),
 
-  listInvites: (campaignId: string) => request<{ invites: Invite[] }>(`/campaigns/${campaignId}/invites`),
+  listMembers: (campaignId: string) =>
+    request<{ members: { discord_id: string; username: string; role: "DM" | "Player" }[] }>(
+      `/api/campaigns/${campaignId}/members`
+    ),
+  setMemberRole: (campaignId: string, discordId: string, role: "DM" | "Player") =>
+    request<void>(`/api/campaigns/${campaignId}/members/${discordId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    }),
+
+  listInvites: (campaignId: string) => request<{ invites: Invite[] }>(`/api/campaigns/${campaignId}/invites`),
   createInvite: (
     campaignId: string,
     input: { role?: "DM" | "Player"; email?: string; maxUses?: number; expiresInDays?: number }
-  ) => request<Invite>(`/campaigns/${campaignId}/invites`, { method: "POST", body: JSON.stringify(input) }),
+  ) => request<Invite>(`/api/campaigns/${campaignId}/invites`, { method: "POST", body: JSON.stringify(input) }),
   revokeInvite: (campaignId: string, token: string) =>
-    request<void>(`/campaigns/${campaignId}/invites/${token}/revoke`, { method: "POST" }),
+    request<void>(`/api/campaigns/${campaignId}/invites/${token}/revoke`, { method: "POST" }),
 };
 
 export { ApiError };

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api, ApiError, type Campaign, type Invite, type AuthedUser } from "../api";
+import { RoleBadge } from "../components/RoleBadge";
 
 function InviteRow({ invite, onRevoke }: { invite: Invite; onRevoke: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -139,6 +140,71 @@ function InviteManager({ campaignId, canGrantDm }: { campaignId: string; canGran
   );
 }
 
+function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boolean }) {
+  const [members, setMembers] = useState<{ discord_id: string; username: string; role: "DM" | "Player" }[] | null>(
+    null
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+
+  function load() {
+    api
+      .listMembers(campaignId)
+      .then(({ members }) => setMembers(members))
+      .catch(() => setError("Couldn't load members."));
+  }
+
+  useEffect(load, [campaignId]);
+
+  async function changeRole(discordId: string, role: "DM" | "Player") {
+    setPendingId(discordId);
+    try {
+      await api.setMemberRole(campaignId, discordId, role);
+      load();
+    } catch {
+      setError("Couldn't update that member's role.");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 16 }}>
+      <h2 style={{ fontSize: 17 }}>Members</h2>
+      {error && <p style={{ color: "var(--pp-crimson)", fontSize: 13 }}>{error}</p>}
+      {members === null && !error && <p>Loading members…</p>}
+      {members?.length === 0 && (
+        <div className="pp-empty">
+          <p>No one's joined yet — send an invite link above.</p>
+        </div>
+      )}
+      <div style={{ display: "grid", gap: 8 }}>
+        {members?.map((m) => (
+          <div
+            key={m.discord_id}
+            className="pp-card"
+            style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+          >
+            <span style={{ fontSize: 14 }}>{m.username}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <RoleBadge role={m.role} />
+              {isRoot && (
+                <button
+                  className="pp-btn pp-btn-ghost"
+                  disabled={pendingId === m.discord_id}
+                  onClick={() => changeRole(m.discord_id, m.role === "DM" ? "Player" : "DM")}
+                >
+                  {pendingId === m.discord_id ? "Updating…" : m.role === "DM" ? "Make Player" : "Make DM"}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const CADENCE_LABEL: Record<Campaign["cadence_type"], string> = {
   "bi-weekly": "Every 2 weeks",
   custom_interval: "Custom interval",
@@ -188,7 +254,10 @@ export function CampaignDetail({ user }: { user: AuthedUser }) {
       </div>
 
       {canManageInvites ? (
-        <InviteManager campaignId={campaignId} canGrantDm={user.globalRole === "root"} />
+        <>
+          <MemberManager campaignId={campaignId} isRoot={user.globalRole === "root"} />
+          <InviteManager campaignId={campaignId} canGrantDm={user.globalRole === "root"} />
+        </>
       ) : (
         <div className="pp-empty">
           <p>The scheduling grid for this campaign isn't built yet — check back soon.</p>

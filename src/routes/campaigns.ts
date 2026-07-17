@@ -68,5 +68,51 @@ export function campaignsRouter(): Router {
     res.json({ campaign: { ...campaign, myRole: membership.role } });
   });
 
+  // Root-only: change an existing member's role (e.g. Player -> DM after
+  // the wrong invite link was used). Not exposed to DMs — the ACL only
+  // grants root the authority to (re)assign roles.
+  router.patch("/campaigns/:campaignId/members/:discordId", requireRoot, async (req, res) => {
+    const role = req.body?.role === "DM" ? "DM" : req.body?.role === "Player" ? "Player" : null;
+    if (!role) {
+      res.status(400).json({ error: "role_must_be_DM_or_Player" });
+      return;
+    }
+
+    const updated = await db()("campaign_members")
+      .where({ campaign_id: req.params.campaignId, discord_id: req.params.discordId })
+      .update({ role });
+
+    if (!updated) {
+      res.status(404).json({ error: "membership_not_found" });
+      return;
+    }
+    res.json({ campaignId: req.params.campaignId, discordId: req.params.discordId, role });
+  });
+
+  // Lists members of a campaign — root or any member of it. Used by the
+  // frontend to let root re-assign roles.
+  router.get("/campaigns/:campaignId/members", requireAuth, async (req, res) => {
+    const campaign = await db()("campaigns").where({ id: req.params.campaignId }).first();
+    if (!campaign) {
+      res.status(404).json({ error: "campaign_not_found" });
+      return;
+    }
+    if (req.user!.globalRole !== "root") {
+      const membership = await db()("campaign_members")
+        .where({ campaign_id: campaign.id, discord_id: req.user!.discordId })
+        .first();
+      if (!membership) {
+        res.status(403).json({ error: "not_a_campaign_member" });
+        return;
+      }
+    }
+
+    const members = await db()("campaign_members")
+      .join("users", "users.discord_id", "campaign_members.discord_id")
+      .where("campaign_members.campaign_id", req.params.campaignId)
+      .select("users.discord_id", "users.username", "campaign_members.role");
+    res.json({ members });
+  });
+
   return router;
 }

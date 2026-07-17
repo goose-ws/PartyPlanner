@@ -6,9 +6,9 @@ import { fileURLToPath } from "node:url";
 import { loadConfig } from "./config.js";
 import { initDb } from "./db/index.js";
 import { sessionMiddleware } from "./middleware/session.js";
-import { authRouter } from "./routes/auth.js";
+import { authPageRouter, authApiRouter } from "./routes/auth.js";
 import { campaignsRouter } from "./routes/campaigns.js";
-import { invitesRouter } from "./routes/invites.js";
+import { invitesApiRouter, invitePageRouter } from "./routes/invites.js";
 
 const cfg = loadConfig();
 initDb(cfg); // migrations already ran as a separate boot step — see src/db/migrate.ts / entrypoint.sh
@@ -26,16 +26,25 @@ app.use(sessionMiddleware(cfg));
 
 app.get("/healthz", (_req, res) => res.status(200).json({ ok: true }));
 
-app.use("/auth", authRouter(cfg));
-app.use("/", invitesRouter(cfg)); // mounts both /campaigns/:id/invites and the public /invite/:token
-app.use("/", campaignsRouter());
+// Browser-navigation endpoints: Discord's redirect_uri and shared invite
+// links land on these directly, so they stay at bare top-level paths that
+// intentionally don't collide with any React Router page.
+app.use("/auth", authPageRouter(cfg));
+app.use("/", invitePageRouter());
+
+// JSON-only endpoints, fetched by the SPA. Everything here lives under
+// /api specifically so it can never collide with a client-side route again
+// — see the /campaigns/:id incident this fixed.
+app.use("/api/auth", authApiRouter(cfg));
+app.use("/api", invitesApiRouter(cfg));
+app.use("/api", campaignsRouter());
 
 // --- Static SPA ---
 // Resolved relative to this compiled file's own location (dist/server.js ->
 // ../web/dist), not process.cwd() — see the knexfile.ts migration-path bug
 // for why that distinction matters in this container.
 const webDistDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "../web/dist");
-const API_PREFIXES = ["/auth", "/invite/", "/campaigns", "/healthz"];
+const API_PREFIXES = ["/api", "/auth", "/invite/", "/healthz"];
 
 app.use(express.static(webDistDir));
 app.get("*", (req, res) => {

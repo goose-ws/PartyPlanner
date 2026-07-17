@@ -8,7 +8,7 @@ import {
   fetchDiscordUser,
 } from "../auth/discord.js";
 import { encryptToken } from "../auth/tokenCrypto.js";
-import { createSession } from "../auth/sessionStore.js";
+import { createSession, destroySession } from "../auth/sessionStore.js";
 import { setSessionCookie, clearSessionCookie } from "../middleware/session.js";
 import { redeemInvite } from "./invites.js";
 
@@ -20,7 +20,14 @@ interface OAuthStatePayload {
   invite: string | null;
 }
 
-export function authRouter(cfg: AppConfig): Router {
+/**
+ * Full-page-navigation routes: Discord redirects the browser here directly,
+ * so these MUST stay at bare top-level paths (/auth/login, /auth/callback)
+ * matching what's registered in the Discord developer portal. Mounted at
+ * /auth in server.ts — never move under /api, and never reuse these path
+ * segments for a client-side (React Router) route.
+ */
+export function authPageRouter(cfg: AppConfig): Router {
   const router = Router();
 
   router.get("/login", (req, res) => {
@@ -93,6 +100,10 @@ export function authRouter(cfg: AppConfig): Router {
         });
       }
 
+      // Redirects to a bare /campaigns/<id> path, which is a REACT ROUTER
+      // page, not an API route — this only works correctly because /api/*
+      // is where all JSON campaign endpoints live now. Do not reuse
+      // /campaigns/:id for anything JSON-returning.
       let redirectPath = "/";
       if (statePayload.invite) {
         const result = await redeemInvite(statePayload.invite, discordUser.id);
@@ -112,10 +123,19 @@ export function authRouter(cfg: AppConfig): Router {
     }
   });
 
+  return router;
+}
+
+/**
+ * JSON-only routes, fetched by the SPA — mounted under /api/auth in
+ * server.ts so they never collide with a client-side route.
+ */
+export function authApiRouter(cfg: AppConfig): Router {
+  const router = Router();
+
   router.post("/logout", async (req, res) => {
     const sid = req.signedCookies?.[cfg.session.cookieName];
     if (sid) {
-      const { destroySession } = await import("../auth/sessionStore.js");
       await destroySession(sid);
     }
     clearSessionCookie(res, cfg);

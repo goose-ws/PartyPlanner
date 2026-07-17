@@ -43,10 +43,12 @@ export async function redeemInvite(
   return { ok: true, campaignId: invite.campaign_id };
 }
 
-export function invitesRouter(cfg: AppConfig): Router {
+/**
+ * JSON management endpoints (create/list/revoke), fetched by the SPA —
+ * mounted under /api in server.ts.
+ */
+export function invitesApiRouter(cfg: AppConfig): Router {
   const router = Router();
-
-  // --- Management (DM or root) ---
 
   router.post("/campaigns/:campaignId/invites", requireCampaignRole(["DM"]), async (req, res) => {
     const { campaignId } = req.params;
@@ -120,7 +122,16 @@ export function invitesRouter(cfg: AppConfig): Router {
     res.status(204).end();
   });
 
-  // --- Public redemption ---
+  return router;
+}
+
+/**
+ * Public redemption — a real browser-navigation target (shared in Discord,
+ * clicked directly), so it MUST stay a bare top-level path, not under /api
+ * and not reusing any React Router path. Mounted at / in server.ts.
+ */
+export function invitePageRouter(): Router {
+  const router = Router();
 
   router.get("/invite/:token", async (req, res) => {
     const { token } = req.params;
