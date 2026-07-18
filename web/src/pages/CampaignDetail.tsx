@@ -314,7 +314,37 @@ const CADENCE_LABEL: Record<Campaign["cadence_type"], string> = {
   weekly_static: "Weekly",
 };
 
-function SchedulingSection({ campaign, user }: { campaign: Campaign; user: AuthedUser }) {
+function RootJoinPrompt({ campaignId, onJoined }: { campaignId: string; onJoined: () => void }) {
+  const [busy, setBusy] = useState(false);
+
+  async function join(role: "DM" | "Player") {
+    setBusy(true);
+    try {
+      await api.joinCampaign(campaignId, role);
+      onJoined();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="pp-card" style={{ padding: 16, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <p style={{ fontSize: 13.5 }}>
+        You're not a member of this campaign yet, so your own availability won't count toward scoring. Join it to participate.
+      </p>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="pp-btn pp-btn-ghost" disabled={busy} onClick={() => join("Player")}>
+          Join as Player
+        </button>
+        <button className="pp-btn pp-btn-brass" disabled={busy} onClick={() => join("DM")}>
+          Join as DM
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SchedulingSection({ campaign, user, onCampaignChanged }: { campaign: Campaign; user: AuthedUser; onCampaignChanged: () => void }) {
   const [availability, setAvailability] = useState<AvailabilityAll | null>(null);
   const [candidates, setCandidates] = useState<CandidateDate[]>([]);
   const [blocked, setBlocked] = useState<BlockedDate[]>([]);
@@ -353,6 +383,9 @@ function SchedulingSection({ campaign, user }: { campaign: Campaign; user: Authe
 
   return (
     <div style={{ display: "grid", gap: 24 }}>
+      {user.globalRole === "root" && !campaign.myRole && (
+        <RootJoinPrompt campaignId={campaign.id} onJoined={onCampaignChanged} />
+      )}
       <WeeklyDefaultsEditor campaignId={campaign.id} onSaved={loadAll} />
       <CalendarMonth candidates={candidates} blocked={blocked} sessions={sessions} onDayClick={setSelectedDate} />
 
@@ -387,13 +420,19 @@ export function CampaignDetail({ user }: { user: AuthedUser }) {
 
   useEffect(() => {
     if (!campaignId) return;
+    reloadCampaign();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignId]);
+
+  function reloadCampaign() {
+    if (!campaignId) return;
     api
       .getCampaign(campaignId)
       .then(({ campaign }) => setCampaign(campaign))
       .catch((err) =>
         setError(err instanceof ApiError && err.status === 403 ? "You're not part of this campaign." : "Campaign not found.")
       );
-  }, [campaignId]);
+  }
 
   if (error) {
     return (
@@ -432,7 +471,7 @@ export function CampaignDetail({ user }: { user: AuthedUser }) {
         </>
       )}
 
-      <SchedulingSection campaign={campaign} user={user} />
+      <SchedulingSection campaign={campaign} user={user} onCampaignChanged={reloadCampaign} />
     </div>
   );
 }

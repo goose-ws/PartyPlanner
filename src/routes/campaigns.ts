@@ -210,5 +210,23 @@ export function campaignsRouter(): Router {
     res.json({ members });
   });
 
+  // Root-only: formally join a campaign as a member. Root can already view
+  // and manage everything without this, but the scoring engine only counts
+  // actual campaign_members — if root is also playing at this table, they
+  // need a real membership row for their availability to factor into scores.
+  router.post("/campaigns/:campaignId/join", requireRoot, async (req, res) => {
+    const role = req.body?.role === "DM" ? "DM" : "Player";
+    const campaign = await db()("campaigns").where({ id: req.params.campaignId }).first();
+    if (!campaign) {
+      res.status(404).json({ error: "campaign_not_found" });
+      return;
+    }
+    await db()("campaign_members")
+      .insert({ campaign_id: req.params.campaignId, discord_id: req.user!.discordId, role })
+      .onConflict(["campaign_id", "discord_id"])
+      .ignore();
+    res.status(204).end();
+  });
+
   return router;
 }

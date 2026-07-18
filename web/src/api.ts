@@ -115,6 +115,8 @@ export const api = {
       blackoutDaysAfterLock: number;
     }>
   ) => request<Campaign>(`/api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  joinCampaign: (id: string, role: "DM" | "Player") =>
+    request<void>(`/api/campaigns/${id}/join`, { method: "POST", body: JSON.stringify({ role }) }),
 
   listMembers: (campaignId: string) =>
     request<{ members: { discord_id: string; username: string; role: "DM" | "Player" }[] }>(
