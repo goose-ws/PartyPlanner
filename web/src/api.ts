@@ -16,6 +16,9 @@ export interface Campaign {
   session_time_start: string;
   session_time_end: string;
   timezone: string;
+  discord_webhook_url?: string | null; // present only for root — redacted otherwise
+  reminder_advance_days: number;
+  reminder_final_days: number;
   myRole?: "DM" | "Player";
 }
 
@@ -113,6 +116,9 @@ export const api = {
       intervalWeeks: number;
       sessionsPerInterval: number;
       blackoutDaysAfterLock: number;
+      discordWebhookUrl: string | null;
+      reminderAdvanceDays: number;
+      reminderFinalDays: number;
     }>
   ) => request<Campaign>(`/api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   joinCampaign: (id: string, role: "DM" | "Player") =>

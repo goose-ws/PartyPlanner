@@ -3,6 +3,13 @@ import crypto from "node:crypto";
 import { db } from "../db/index.js";
 import { requireRoot, requireAuth } from "../middleware/authz.js";
 
+/** The webhook URL is a bearer credential — anyone holding it can post into that Discord channel — so it's never sent to non-root callers. */
+function redactWebhook<T extends Record<string, any>>(campaign: T, isRoot: boolean): T {
+  if (isRoot) return campaign;
+  const { discord_webhook_url, ...rest } = campaign;
+  return rest as T;
+}
+
 export function campaignsRouter(): Router {
   const router = Router();
 
@@ -116,6 +123,29 @@ export function campaignsRouter(): Router {
       updates.blackout_days_after_lock = req.body.blackoutDaysAfterLock;
     }
 
+    if (req.body?.discordWebhookUrl !== undefined) {
+      const url = req.body.discordWebhookUrl;
+      if (url !== null && (typeof url !== "string" || !/^https:\/\/discord\.com\/api\/webhooks\//.test(url))) {
+        res.status(400).json({ error: "invalid_discord_webhook_url" });
+        return;
+      }
+      updates.discord_webhook_url = url;
+    }
+    if (req.body?.reminderAdvanceDays !== undefined) {
+      if (!Number.isInteger(req.body.reminderAdvanceDays) || req.body.reminderAdvanceDays < 0) {
+        res.status(400).json({ error: "invalid_reminderAdvanceDays" });
+        return;
+      }
+      updates.reminder_advance_days = req.body.reminderAdvanceDays;
+    }
+    if (req.body?.reminderFinalDays !== undefined) {
+      if (!Number.isInteger(req.body.reminderFinalDays) || req.body.reminderFinalDays < 0) {
+        res.status(400).json({ error: "invalid_reminderFinalDays" });
+        return;
+      }
+      updates.reminder_final_days = req.body.reminderFinalDays;
+    }
+
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ error: "no_updatable_fields_provided" });
       return;
@@ -128,7 +158,8 @@ export function campaignsRouter(): Router {
 
   // Lists campaigns the caller belongs to (root sees all).
   router.get("/campaigns", requireAuth, async (req, res) => {
-    if (req.user!.globalRole === "root") {
+    const isRoot = req.user!.globalRole === "root";
+    if (isRoot) {
       const campaigns = await db()("campaigns").select("*");
       res.json({ campaigns });
       return;
@@ -137,7 +168,7 @@ export function campaignsRouter(): Router {
       .join("campaign_members", "campaign_members.campaign_id", "campaigns.id")
       .where("campaign_members.discord_id", req.user!.discordId)
       .select("campaigns.*", "campaign_members.role as myRole");
-    res.json({ campaigns });
+    res.json({ campaigns: campaigns.map((c) => redactWebhook(c, isRoot)) });
   });
 
   // Single campaign — root or any member of it.
@@ -161,7 +192,7 @@ export function campaignsRouter(): Router {
       return;
     }
 
-    res.json({ campaign: { ...campaign, myRole: membership.role } });
+    res.json({ campaign: redactWebhook({ ...campaign, myRole: membership.role }, false) });
   });
 
   // Root-only: change an existing member's role (e.g. Player -> DM after

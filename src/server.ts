@@ -11,6 +11,7 @@ import { campaignsRouter } from "./routes/campaigns.js";
 import { invitesApiRouter, invitePageRouter } from "./routes/invites.js";
 import { availabilityRouter } from "./routes/availability.js";
 import { schedulingRouter } from "./routes/scheduling.js";
+import { runReminderCheck } from "./scheduling/reminders.js";
 
 const cfg = loadConfig();
 initDb(cfg); // migrations already ran as a separate boot step — see src/db/migrate.ts / entrypoint.sh
@@ -67,3 +68,16 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 app.listen(cfg.port, () => {
   console.log(`[server] Party Planner listening on :${cfg.port} (public URL: ${cfg.publicUrl})`);
 });
+
+// In-process reminder scheduler. A single container instance is assumed
+// (see docker-compose.yml — no horizontal scaling), so a plain interval
+// timer is sufficient; no external cron or job queue needed. State that
+// prevents duplicate sends lives in the DB (campaigns.last_reminder_*),
+// so this is safe across restarts and doesn't need its own persistence.
+const REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // hourly
+setTimeout(() => {
+  runReminderCheck().catch((err) => console.error("[reminders] Initial check failed:", err));
+  setInterval(() => {
+    runReminderCheck().catch((err) => console.error("[reminders] Scheduled check failed:", err));
+  }, REMINDER_CHECK_INTERVAL_MS);
+}, 30_000); // wait 30s after boot so DB connections are warmed up first

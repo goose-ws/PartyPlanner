@@ -24,12 +24,12 @@ export interface BlockedDate {
 }
 
 /** Inclusive block index containing `date`, relative to the campaign's anchor. */
-function blockIndexOf(campaign: CampaignCadence, date: DateStr): number {
+export function blockIndexOf(campaign: CampaignCadence, date: DateStr): number {
   const blockLengthDays = campaign.interval_weeks * 7;
   return Math.floor(diffDays(campaign.start_date, date) / blockLengthDays);
 }
 
-function blockRange(campaign: CampaignCadence, blockIndex: number): { start: DateStr; end: DateStr } {
+export function blockRange(campaign: CampaignCadence, blockIndex: number): { start: DateStr; end: DateStr } {
   const blockLengthDays = campaign.interval_weeks * 7;
   const start = addDays(campaign.start_date, blockIndex * blockLengthDays);
   const end = addDays(start, blockLengthDays); // exclusive

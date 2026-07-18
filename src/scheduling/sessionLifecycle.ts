@@ -2,15 +2,18 @@ import crypto from "node:crypto";
 import { DateTime } from "luxon";
 import { db } from "../db/index.js";
 import { addDays, type DateStr } from "./dateMath.js";
+import { announceSessionLocked, announceSessionCancelled, announceBlockSkipped } from "../discord/announcements.js";
 
 interface CampaignForLifecycle {
   id: string;
+  name: string;
   start_date: DateStr;
   interval_weeks: number;
   session_time_start: string; // 'HH:MM:SS'
   session_time_end: string;
   timezone: string;
   last_session_number: number;
+  discord_webhook_url: string | null;
 }
 
 /**
@@ -53,7 +56,7 @@ function blockRangeUtcDates(campaign: CampaignForLifecycle, anyDateInBlock: Date
 }
 
 export async function lockSessionDate(campaignId: string, date: DateStr) {
-  return db().transaction(async (trx) => {
+  const result = await db().transaction(async (trx) => {
     const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
     if (!campaign) throw new Error("campaign_not_found");
 
@@ -71,8 +74,14 @@ export async function lockSessionDate(campaignId: string, date: DateStr) {
     });
     await trx("campaigns").where({ id: campaignId }).update({ last_session_number: nextNumber });
 
-    return { id, sessionNumber: nextNumber, scheduledStartUtc: startUtc, scheduledEndUtc: endUtc };
+    return { id, sessionNumber: nextNumber, scheduledStartUtc: startUtc, scheduledEndUtc: endUtc, campaign };
   });
+
+  // Sent after the transaction commits — a webhook hiccup shouldn't affect
+  // whether the lock itself succeeded, and sendDiscordMessage never throws.
+  await announceSessionLocked(result.campaign, result.sessionNumber, result.scheduledStartUtc);
+
+  return { id: result.id, sessionNumber: result.sessionNumber, scheduledStartUtc: result.scheduledStartUtc, scheduledEndUtc: result.scheduledEndUtc };
 }
 
 /**
@@ -85,12 +94,12 @@ export async function lockSessionDate(campaignId: string, date: DateStr) {
  * assigned after it.
  */
 export async function cancelSession(campaignId: string, sessionId: string) {
-  return db().transaction(async (trx) => {
+  const result = await db().transaction(async (trx) => {
     const session = await trx("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
     if (!session) throw new Error("session_not_found");
     if (session.status !== "scheduled") throw new Error("only_scheduled_sessions_can_be_cancelled");
 
-    const campaign = await trx("campaigns").where({ id: campaignId }).first();
+    const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
     const wasLatest = session.session_number === campaign.last_session_number;
 
     await trx("sessions").where({ id: sessionId }).update({ status: "cancelled" });
@@ -99,7 +108,11 @@ export async function cancelSession(campaignId: string, sessionId: string) {
         .where({ id: campaignId })
         .update({ last_session_number: Math.max(0, campaign.last_session_number - 1) });
     }
+
+    return { campaign, sessionNumber: session.session_number as number };
   });
+
+  await announceSessionCancelled(result.campaign, result.sessionNumber);
 }
 
 /** Flags an entire cadence block as intentionally skipped (e.g. a holiday break). */
@@ -118,6 +131,10 @@ export async function skipBlock(campaignId: string, anyDateInBlock: DateStr, not
     status: "skipped",
     notes,
   });
+
+  const blockEndInclusive = addDays(end, -1); // end is exclusive
+  await announceBlockSkipped(campaign, start, blockEndInclusive, notes);
+
   return { id, blockStart: start, blockEnd: end };
 }
 

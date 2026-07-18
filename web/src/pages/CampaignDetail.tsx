@@ -218,6 +218,9 @@ function SettingsPanel({ campaign, onUpdated }: { campaign: Campaign; onUpdated:
   const [timezone, setTimezone] = useState(campaign.timezone);
   const [intervalWeeks, setIntervalWeeks] = useState(campaign.interval_weeks);
   const [sessionsPerInterval, setSessionsPerInterval] = useState(campaign.sessions_per_interval);
+  const [webhookUrl, setWebhookUrl] = useState(campaign.discord_webhook_url ?? "");
+  const [advanceDays, setAdvanceDays] = useState(campaign.reminder_advance_days);
+  const [finalDays, setFinalDays] = useState(campaign.reminder_final_days);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -232,6 +235,9 @@ function SettingsPanel({ campaign, onUpdated }: { campaign: Campaign; onUpdated:
         timezone,
         intervalWeeks,
         sessionsPerInterval,
+        discordWebhookUrl: webhookUrl.trim() || null,
+        reminderAdvanceDays: advanceDays,
+        reminderFinalDays: finalDays,
       });
       onUpdated(updated);
       setOpen(false);
@@ -292,6 +298,38 @@ function SettingsPanel({ campaign, onUpdated }: { campaign: Campaign; onUpdated:
             className="pp-input"
             value={sessionsPerInterval}
             onChange={(e) => setSessionsPerInterval(Number(e.target.value))}
+          />
+        </div>
+        <div className="pp-field" style={{ gridColumn: "1 / -1" }}>
+          <label htmlFor="s-webhook">Discord webhook URL (optional)</label>
+          <input
+            id="s-webhook"
+            className="pp-input"
+            value={webhookUrl}
+            onChange={(e) => setWebhookUrl(e.target.value)}
+            placeholder="https://discord.com/api/webhooks/…"
+          />
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-advance">Advance reminder (days before)</label>
+          <input
+            id="s-advance"
+            type="number"
+            min={0}
+            className="pp-input"
+            value={advanceDays}
+            onChange={(e) => setAdvanceDays(Number(e.target.value))}
+          />
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-final">Final-call reminder (days before)</label>
+          <input
+            id="s-final"
+            type="number"
+            min={0}
+            className="pp-input"
+            value={finalDays}
+            onChange={(e) => setFinalDays(Number(e.target.value))}
           />
         </div>
       </div>
