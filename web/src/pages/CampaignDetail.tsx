@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api, ApiError, type Campaign, type Invite, type AuthedUser } from "../api";
+import { api, ApiError, type Campaign, type Invite, type AuthedUser, type AvailabilityAll, type CandidateDate, type BlockedDate, type Session, type Stats } from "../api";
 import { RoleBadge } from "../components/RoleBadge";
+import { WeeklyDefaultsEditor } from "../components/WeeklyDefaults";
+import { CalendarMonth } from "../components/CalendarMonth";
+import { DayDetailModal } from "../components/DayDetailModal";
+import { SessionsList } from "../components/SessionsList";
+import { StatsPanel } from "../components/StatsPanel";
+import type { DateStr } from "../dateMath";
 
 function InviteRow({ invite, onRevoke }: { invite: Invite; onRevoke: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -308,6 +314,72 @@ const CADENCE_LABEL: Record<Campaign["cadence_type"], string> = {
   weekly_static: "Weekly",
 };
 
+function SchedulingSection({ campaign, user }: { campaign: Campaign; user: AuthedUser }) {
+  const [availability, setAvailability] = useState<AvailabilityAll | null>(null);
+  const [candidates, setCandidates] = useState<CandidateDate[]>([]);
+  const [blocked, setBlocked] = useState<BlockedDate[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [selectedDate, setSelectedDate] = useState<DateStr | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadAll() {
+    try {
+      const [avail, cand, sess, st] = await Promise.all([
+        api.getAllAvailability(campaign.id),
+        api.getCandidates(campaign.id),
+        api.getSessions(campaign.id),
+        api.getStats(campaign.id),
+      ]);
+      setAvailability(avail);
+      setCandidates(cand.candidates);
+      setBlocked(cand.blocked);
+      setSessions(sess.sessions);
+      setStats(st);
+    } catch {
+      setError("Couldn't load scheduling data.");
+    }
+  }
+
+  useEffect(() => {
+    loadAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaign.id]);
+
+  const canManage = user.globalRole === "root" || campaign.myRole === "DM";
+
+  if (error) return <p style={{ color: "var(--pp-crimson)" }}>{error}</p>;
+  if (!availability) return <p>Loading scheduling data…</p>;
+
+  return (
+    <div style={{ display: "grid", gap: 24 }}>
+      <WeeklyDefaultsEditor campaignId={campaign.id} onSaved={loadAll} />
+      <CalendarMonth candidates={candidates} blocked={blocked} sessions={sessions} onDayClick={setSelectedDate} />
+
+      <div>
+        <h2 style={{ fontSize: 17, marginBottom: 12 }}>Sessions</h2>
+        <SessionsList sessions={sessions} campaignId={campaign.id} canManage={canManage} onChanged={loadAll} />
+      </div>
+
+      {stats && <StatsPanel stats={stats} />}
+
+      {selectedDate && (
+        <DayDetailModal
+          date={selectedDate}
+          campaignId={campaign.id}
+          campaignMyRole={campaign.myRole}
+          user={user}
+          availability={availability}
+          candidate={candidates.find((c) => c.date === selectedDate)}
+          session={sessions.find((s) => s.scheduled_start_utc.slice(0, 10) === selectedDate && s.status !== "cancelled")}
+          onClose={() => setSelectedDate(null)}
+          onChanged={loadAll}
+        />
+      )}
+    </div>
+  );
+}
+
 export function CampaignDetail({ user }: { user: AuthedUser }) {
   const { campaignId } = useParams<{ campaignId: string }>();
   const [campaign, setCampaign] = useState<Campaign | null>(null);
@@ -353,16 +425,14 @@ export function CampaignDetail({ user }: { user: AuthedUser }) {
 
       {user.globalRole === "root" && <SettingsPanel campaign={campaign} onUpdated={setCampaign} />}
 
-      {canManageInvites ? (
+      {canManageInvites && (
         <>
           <MemberManager campaignId={campaignId} isRoot={user.globalRole === "root"} />
           <InviteManager campaignId={campaignId} canGrantDm={user.globalRole === "root"} />
         </>
-      ) : (
-        <div className="pp-empty">
-          <p>The scheduling grid for this campaign isn't built yet — check back soon.</p>
-        </div>
       )}
+
+      <SchedulingSection campaign={campaign} user={user} />
     </div>
   );
 }

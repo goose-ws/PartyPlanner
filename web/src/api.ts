@@ -31,6 +31,52 @@ export interface Invite {
   createdAt: string;
 }
 
+export interface Member {
+  discordId: string;
+  username: string;
+  role: "DM" | "Player";
+}
+
+export interface AvailabilityAll {
+  members: Member[];
+  defaults: Array<{ discordId: string; dayOfWeek: number; weight: number }>;
+  specific: Array<{ discordId: string; date: string; weight: number }>;
+}
+
+export interface CandidateDate {
+  date: string;
+  score: number;
+  isDmAvailable: boolean;
+  breakdown: Array<{ discordId: string; weight: number }>;
+}
+export interface BlockedDate {
+  date: string;
+  reason: "block_full" | "block_skipped" | "blackout";
+}
+
+export interface Session {
+  id: string;
+  campaign_id: string;
+  session_number: number | null;
+  scheduled_start_utc: string;
+  scheduled_end_utc: string;
+  status: "scheduled" | "completed" | "skipped" | "cancelled";
+  notes: string | null;
+}
+
+export interface AttendanceRow {
+  discordId: string;
+  username: string;
+  totalSessions: number;
+  totalAbsences: number;
+  attendanceRate: number | null;
+}
+export interface Stats {
+  attendance: AttendanceRow[];
+  sessionCounts: Record<string, number>;
+  campaignAgeDays: number;
+}
+
 class ApiError extends Error {
   constructor(public status: number, public code: string) {
     super(code);
@@ -87,6 +133,30 @@ export const api = {
   ) => request<Invite>(`/api/campaigns/${campaignId}/invites`, { method: "POST", body: JSON.stringify(input) }),
   revokeInvite: (campaignId: string, token: string) =>
     request<void>(`/api/campaigns/${campaignId}/invites/${token}/revoke`, { method: "POST" }),
+
+  getAllAvailability: (campaignId: string) => request<AvailabilityAll>(`/api/campaigns/${campaignId}/availability/all`),
+  setDefaultAvailability: (campaignId: string, days: Array<{ dayOfWeek: number; weight: number }>, discordId?: string) =>
+    request<void>(`/api/campaigns/${campaignId}/availability/default`, {
+      method: "PUT",
+      body: JSON.stringify({ days, discordId }),
+    }),
+  setSpecificAvailability: (campaignId: string, date: string, weight: number | null, discordId?: string) =>
+    request<void>(`/api/campaigns/${campaignId}/availability/specific`, {
+      method: "PUT",
+      body: JSON.stringify({ date, weight, discordId }),
+    }),
+
+  getCandidates: (campaignId: string, months = 6) =>
+    request<{ candidates: CandidateDate[]; blocked: BlockedDate[] }>(`/api/campaigns/${campaignId}/candidates?months=${months}`),
+  getSessions: (campaignId: string) => request<{ sessions: Session[] }>(`/api/campaigns/${campaignId}/sessions`),
+  lockSession: (campaignId: string, date: string) =>
+    request<Session>(`/api/campaigns/${campaignId}/sessions/lock`, { method: "POST", body: JSON.stringify({ date }) }),
+  cancelSession: (campaignId: string, sessionId: string) =>
+    request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/cancel`, { method: "POST" }),
+  skipBlock: (campaignId: string, date: string, notes?: string) =>
+    request<void>(`/api/campaigns/${campaignId}/blocks/skip`, { method: "POST", body: JSON.stringify({ date, notes }) }),
+
+  getStats: (campaignId: string) => request<Stats>(`/api/campaigns/${campaignId}/stats`),
 };
 
 export { ApiError };

@@ -111,5 +111,26 @@ export function availabilityRouter(): Router {
     res.status(204).end();
   });
 
+  // Everyone's availability — any member can VIEW this (per the ACL: you
+  // can see the whole table's responses), but writes still go through the
+  // /default and /specific endpoints above with their own-vs-others check.
+  router.get("/campaigns/:campaignId/availability/all", requireCampaignRole(["DM", "Player"]), async (req, res) => {
+    const campaignId = req.params.campaignId!;
+    const [members, defaults, specific] = await Promise.all([
+      db()("campaign_members")
+        .join("users", "users.discord_id", "campaign_members.discord_id")
+        .where("campaign_members.campaign_id", campaignId)
+        .select("users.discord_id", "users.username", "campaign_members.role"),
+      db()("default_availability").where({ campaign_id: campaignId }),
+      db()("specific_availability").where({ campaign_id: campaignId }),
+    ]);
+
+    res.json({
+      members: members.map((m) => ({ discordId: m.discord_id, username: m.username, role: m.role })),
+      defaults: defaults.map((d) => ({ discordId: d.discord_id, dayOfWeek: d.day_of_week, weight: d.weight })),
+      specific: specific.map((s) => ({ discordId: s.discord_id, date: s.date_utc, weight: s.weight })),
+    });
+  });
+
   return router;
 }
