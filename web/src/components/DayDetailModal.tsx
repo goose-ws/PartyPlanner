@@ -28,6 +28,7 @@ export function DayDetailModal({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rescheduleDate, setRescheduleDate] = useState("");
   const isRoot = user.globalRole === "root";
   const isDm = campaignMyRole === "DM";
   const canManage = isRoot || isDm;
@@ -70,6 +71,25 @@ export function DayDetailModal({
       onClose();
     } catch {
       setError("Couldn't cancel this session.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reschedule() {
+    if (!session || !rescheduleDate) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.rescheduleSession(campaignId, session.id, rescheduleDate);
+      onChanged();
+      onClose();
+    } catch (err: any) {
+      setError(
+        err?.code === "target_block_already_full"
+          ? "That date's block already has a session locked."
+          : "Couldn't reschedule — check the date and try again."
+      );
     } finally {
       setBusy(false);
     }
@@ -161,9 +181,23 @@ export function DayDetailModal({
               </button>
             )}
             {session?.status === "scheduled" && (
-              <button className="pp-btn pp-btn-danger" disabled={busy} onClick={cancel}>
-                Cancel session
-              </button>
+              <>
+                <button className="pp-btn pp-btn-danger" disabled={busy} onClick={cancel}>
+                  Cancel session
+                </button>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    type="date"
+                    className="pp-input"
+                    value={rescheduleDate}
+                    onChange={(e) => setRescheduleDate(e.target.value)}
+                    style={{ padding: "8px 10px" }}
+                  />
+                  <button className="pp-btn pp-btn-ghost" disabled={busy || !rescheduleDate} onClick={reschedule}>
+                    Move here
+                  </button>
+                </div>
+              </>
             )}
             {!session && (
               <button className="pp-btn pp-btn-ghost" disabled={busy} onClick={skip}>

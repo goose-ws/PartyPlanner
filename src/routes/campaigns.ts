@@ -2,6 +2,9 @@ import { Router } from "express";
 import crypto from "node:crypto";
 import { db } from "../db/index.js";
 import { requireRoot, requireAuth } from "../middleware/authz.js";
+import { requireCampaignRole } from "../middleware/authz.js";
+import { generateUniqueSlug } from "../scheduling/slug.js";
+import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
 
 /** The webhook URL is a bearer credential — anyone holding it can post into that Discord channel — so it's never sent to non-root callers. */
 function redactWebhook<T extends Record<string, any>>(campaign: T, isRoot: boolean): T {
@@ -12,6 +15,7 @@ function redactWebhook<T extends Record<string, any>>(campaign: T, isRoot: boole
 
 export function campaignsRouter(): Router {
   const router = Router();
+  router.param("campaignId", resolveCampaignParam);
 
   // Only root creates campaigns — DMs are assigned to existing campaigns, per the ACL.
   router.post("/campaigns", requireRoot, async (req, res) => {
@@ -31,8 +35,10 @@ export function campaignsRouter(): Router {
     }
 
     const id = crypto.randomUUID();
+    const slug = await generateUniqueSlug(name);
     await db()("campaigns").insert({
       id,
+      slug,
       name,
       start_date: startDate,
       cadence_type: req.body?.cadenceType ?? "bi-weekly",
@@ -156,11 +162,20 @@ export function campaignsRouter(): Router {
     res.json(updated);
   });
 
-  // Lists campaigns the caller belongs to (root sees all).
+  // Lists campaigns the caller belongs to (root sees all, plus their own
+  // myRole for any campaign they've actually joined via /join).
   router.get("/campaigns", requireAuth, async (req, res) => {
     const isRoot = req.user!.globalRole === "root";
     if (isRoot) {
-      const campaigns = await db()("campaigns").select("*");
+      const campaigns = await db()("campaigns")
+        .leftJoin("campaign_members", function () {
+          this.on("campaign_members.campaign_id", "=", "campaigns.id").andOnVal(
+            "campaign_members.discord_id",
+            "=",
+            req.user!.discordId
+          );
+        })
+        .select("campaigns.*", "campaign_members.role as myRole");
       res.json({ campaigns });
       return;
     }
@@ -171,7 +186,9 @@ export function campaignsRouter(): Router {
     res.json({ campaigns: campaigns.map((c) => redactWebhook(c, isRoot)) });
   });
 
-  // Single campaign — root or any member of it.
+  // Single campaign — root or any member of it. Root always has access
+  // regardless of membership, but myRole still reflects real membership
+  // (if any) rather than always being blank.
   router.get("/campaigns/:campaignId", requireAuth, async (req, res) => {
     const campaign = await db()("campaigns").where({ id: req.params.campaignId }).first();
     if (!campaign) {
@@ -179,14 +196,15 @@ export function campaignsRouter(): Router {
       return;
     }
 
-    if (req.user!.globalRole === "root") {
-      res.json({ campaign });
-      return;
-    }
-
     const membership = await db()("campaign_members")
       .where({ campaign_id: campaign.id, discord_id: req.user!.discordId })
       .first();
+
+    if (req.user!.globalRole === "root") {
+      res.json({ campaign: membership ? { ...campaign, myRole: membership.role } : campaign });
+      return;
+    }
+
     if (!membership) {
       res.status(403).json({ error: "not_a_campaign_member" });
       return;
@@ -214,6 +232,29 @@ export function campaignsRouter(): Router {
       return;
     }
     res.json({ campaignId: req.params.campaignId, discordId: req.params.discordId, role });
+  });
+
+  // Remove a member from the campaign. Root can remove anyone; a DM can
+  // only remove Players (not another DM) — same trust boundary as invites,
+  // where a DM can hand out Player invites but only root mints a DM one.
+  router.delete("/campaigns/:campaignId/members/:discordId", requireCampaignRole(["DM"]), async (req, res) => {
+    const target = await db()("campaign_members")
+      .where({ campaign_id: req.params.campaignId, discord_id: req.params.discordId })
+      .first();
+    if (!target) {
+      res.status(404).json({ error: "membership_not_found" });
+      return;
+    }
+
+    if (target.role === "DM" && req.user!.globalRole !== "root") {
+      res.status(403).json({ error: "only_root_can_remove_a_dm" });
+      return;
+    }
+
+    await db()("campaign_members")
+      .where({ campaign_id: req.params.campaignId, discord_id: req.params.discordId })
+      .delete();
+    res.status(204).end();
   });
 
   // Lists members of a campaign — root or any member of it. Used by the

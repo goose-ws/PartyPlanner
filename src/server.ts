@@ -16,6 +16,13 @@ import { runReminderCheck } from "./scheduling/reminders.js";
 const cfg = loadConfig();
 initDb(cfg); // migrations already ran as a separate boot step — see src/db/migrate.ts / entrypoint.sh
 
+if (cfg.devFakeLoginEnabled) {
+  console.warn(
+    "\n[server] ⚠️  DEV_FAKE_LOGIN is enabled — anyone can log in as a test-* account without Discord. " +
+      "This must NEVER be set in a production deployment.\n"
+  );
+}
+
 const app = express();
 
 // Nginx terminates TLS in front of us; trust its X-Forwarded-* headers so

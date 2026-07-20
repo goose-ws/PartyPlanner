@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
-import { api, ApiError, type Campaign, type Invite, type AuthedUser, type AvailabilityAll, type CandidateDate, type BlockedDate, type Session, type Stats } from "../api";
+import { api, ApiError, type Campaign, type Invite, type AuthedUser } from "../api";
 import { RoleBadge } from "../components/RoleBadge";
 import { WeeklyDefaultsEditor } from "../components/WeeklyDefaults";
 import { CalendarMonth } from "../components/CalendarMonth";
 import { DayDetailModal } from "../components/DayDetailModal";
 import { SessionsList } from "../components/SessionsList";
 import { StatsPanel } from "../components/StatsPanel";
+import { Tabs } from "../components/Tabs";
+import { useSchedulingData } from "../hooks/useSchedulingData";
 import type { DateStr } from "../dateMath";
 
 function InviteRow({ invite, onRevoke }: { invite: Invite; onRevoke: () => void }) {
@@ -174,6 +176,19 @@ function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boo
     }
   }
 
+  async function remove(discordId: string, username: string) {
+    if (!confirm(`Remove ${username} from this campaign? Their past responses stay on record.`)) return;
+    setPendingId(discordId);
+    try {
+      await api.removeMember(campaignId, discordId);
+      load();
+    } catch {
+      setError("Couldn't remove that member.");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
   return (
     <div style={{ display: "grid", gap: 16 }}>
       <h2 style={{ fontSize: 17 }}>Members</h2>
@@ -185,34 +200,54 @@ function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boo
         </div>
       )}
       <div style={{ display: "grid", gap: 8 }}>
-        {members?.map((m) => (
-          <div
-            key={m.discord_id}
-            className="pp-card"
-            style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}
-          >
-            <span style={{ fontSize: 14 }}>{m.username}</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <RoleBadge role={m.role} />
-              {isRoot && (
-                <button
-                  className="pp-btn pp-btn-ghost"
-                  disabled={pendingId === m.discord_id}
-                  onClick={() => changeRole(m.discord_id, m.role === "DM" ? "Player" : "DM")}
-                >
-                  {pendingId === m.discord_id ? "Updating…" : m.role === "DM" ? "Make Player" : "Make DM"}
-                </button>
-              )}
+        {members?.map((m) => {
+          const canRemove = isRoot || m.role === "Player";
+          return (
+            <div
+              key={m.discord_id}
+              className="pp-card"
+              style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+            >
+              <span style={{ fontSize: 14 }}>{m.username}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <RoleBadge role={m.role} />
+                {isRoot && (
+                  <button
+                    className="pp-btn pp-btn-ghost"
+                    disabled={pendingId === m.discord_id}
+                    onClick={() => changeRole(m.discord_id, m.role === "DM" ? "Player" : "DM")}
+                  >
+                    {pendingId === m.discord_id ? "Updating…" : m.role === "DM" ? "Make Player" : "Make DM"}
+                  </button>
+                )}
+                {canRemove && (
+                  <button
+                    className="pp-btn pp-btn-danger"
+                    disabled={pendingId === m.discord_id}
+                    onClick={() => remove(m.discord_id, m.username)}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function SettingsPanel({ campaign, onUpdated }: { campaign: Campaign; onUpdated: (c: Campaign) => void }) {
-  const [open, setOpen] = useState(false);
+function SettingsPanel({
+  campaign,
+  onUpdated,
+  alwaysOpen,
+}: {
+  campaign: Campaign;
+  onUpdated: (c: Campaign) => void;
+  alwaysOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(!!alwaysOpen);
   const [start, setStart] = useState(campaign.session_time_start.slice(0, 5));
   const [end, setEnd] = useState(campaign.session_time_end.slice(0, 5));
   const [timezone, setTimezone] = useState(campaign.timezone);
@@ -240,7 +275,7 @@ function SettingsPanel({ campaign, onUpdated }: { campaign: Campaign; onUpdated:
         reminderFinalDays: finalDays,
       });
       onUpdated(updated);
-      setOpen(false);
+      if (!alwaysOpen) setOpen(false);
     } catch {
       setError("Couldn't save — check the values and try again.");
     } finally {
@@ -338,9 +373,11 @@ function SettingsPanel({ campaign, onUpdated }: { campaign: Campaign; onUpdated:
         <button className="pp-btn pp-btn-primary" disabled={busy} type="submit">
           {busy ? "Saving…" : "Save"}
         </button>
-        <button className="pp-btn pp-btn-ghost" type="button" onClick={() => setOpen(false)}>
-          Cancel
-        </button>
+        {!alwaysOpen && (
+          <button className="pp-btn pp-btn-ghost" type="button" onClick={() => setOpen(false)}>
+            Cancel
+          </button>
+        )}
       </div>
     </form>
   );
@@ -382,58 +419,30 @@ function RootJoinPrompt({ campaignId, onJoined }: { campaignId: string; onJoined
   );
 }
 
-function SchedulingSection({ campaign, user, onCampaignChanged }: { campaign: Campaign; user: AuthedUser; onCampaignChanged: () => void }) {
-  const [availability, setAvailability] = useState<AvailabilityAll | null>(null);
-  const [candidates, setCandidates] = useState<CandidateDate[]>([]);
-  const [blocked, setBlocked] = useState<BlockedDate[]>([]);
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [stats, setStats] = useState<Stats | null>(null);
+function CampaignTabs({
+  campaign,
+  user,
+  onCampaignChanged,
+}: {
+  campaign: Campaign;
+  user: AuthedUser;
+  onCampaignChanged: () => void;
+}) {
+  const { availability, candidates, blocked, sessions, stats, error, reload } = useSchedulingData(campaign.id);
   const [selectedDate, setSelectedDate] = useState<DateStr | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  async function loadAll() {
-    try {
-      const [avail, cand, sess, st] = await Promise.all([
-        api.getAllAvailability(campaign.id),
-        api.getCandidates(campaign.id),
-        api.getSessions(campaign.id),
-        api.getStats(campaign.id),
-      ]);
-      setAvailability(avail);
-      setCandidates(cand.candidates);
-      setBlocked(cand.blocked);
-      setSessions(sess.sessions);
-      setStats(st);
-    } catch {
-      setError("Couldn't load scheduling data.");
-    }
-  }
-
-  useEffect(() => {
-    loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaign.id]);
-
-  const canManage = user.globalRole === "root" || campaign.myRole === "DM";
+  const isRoot = user.globalRole === "root";
+  const isDm = campaign.myRole === "DM";
+  const canManage = isRoot || isDm;
 
   if (error) return <p style={{ color: "var(--pp-crimson)" }}>{error}</p>;
   if (!availability) return <p>Loading scheduling data…</p>;
 
-  return (
+  const scheduleTab = (
     <div style={{ display: "grid", gap: 24 }}>
-      {user.globalRole === "root" && !campaign.myRole && (
-        <RootJoinPrompt campaignId={campaign.id} onJoined={onCampaignChanged} />
-      )}
-      <WeeklyDefaultsEditor campaignId={campaign.id} onSaved={loadAll} />
+      {isRoot && !campaign.myRole && <RootJoinPrompt campaignId={campaign.id} onJoined={onCampaignChanged} />}
+      <WeeklyDefaultsEditor campaignId={campaign.id} onSaved={reload} />
       <CalendarMonth candidates={candidates} blocked={blocked} sessions={sessions} onDayClick={setSelectedDate} />
-
-      <div>
-        <h2 style={{ fontSize: 17, marginBottom: 12 }}>Sessions</h2>
-        <SessionsList sessions={sessions} campaignId={campaign.id} canManage={canManage} onChanged={loadAll} />
-      </div>
-
-      {stats && <StatsPanel stats={stats} />}
-
       {selectedDate && (
         <DayDetailModal
           date={selectedDate}
@@ -444,11 +453,45 @@ function SchedulingSection({ campaign, user, onCampaignChanged }: { campaign: Ca
           candidate={candidates.find((c) => c.date === selectedDate)}
           session={sessions.find((s) => s.scheduled_start_utc.slice(0, 10) === selectedDate && s.status !== "cancelled")}
           onClose={() => setSelectedDate(null)}
-          onChanged={loadAll}
+          onChanged={reload}
         />
       )}
     </div>
   );
+
+  const sessionsTab = (
+    <SessionsList sessions={sessions} campaignId={campaign.id} campaignName={campaign.name} canManage={canManage} onChanged={reload} />
+  );
+
+  const statsTab = stats ? <StatsPanel stats={stats} /> : <p>Loading stats…</p>;
+
+  const tabs = [
+    { id: "schedule", label: "Schedule", content: scheduleTab },
+    { id: "sessions", label: "Sessions", content: sessionsTab },
+    { id: "stats", label: "Stats", content: statsTab },
+  ];
+
+  if (canManage) {
+    tabs.push({
+      id: "members",
+      label: "Members",
+      content: (
+        <div style={{ display: "grid", gap: 24 }}>
+          <MemberManager campaignId={campaign.id} isRoot={isRoot} />
+          <InviteManager campaignId={campaign.id} canGrantDm={isRoot} />
+        </div>
+      ),
+    });
+  }
+  if (isRoot) {
+    tabs.push({
+      id: "settings",
+      label: "Settings",
+      content: <SettingsPanel campaign={campaign} onUpdated={() => onCampaignChanged()} alwaysOpen />,
+    });
+  }
+
+  return <Tabs tabs={tabs} />;
 }
 
 export function CampaignDetail({ user }: { user: AuthedUser }) {
@@ -485,10 +528,8 @@ export function CampaignDetail({ user }: { user: AuthedUser }) {
 
   if (!campaign || !campaignId) return <p>Loading…</p>;
 
-  const canManageInvites = user.globalRole === "root" || campaign.myRole === "DM";
-
   return (
-    <div style={{ display: "grid", gap: 32 }}>
+    <div style={{ display: "grid", gap: 24 }}>
       <div>
         <Link to="/" style={{ fontSize: 13, color: "var(--pp-ink-soft)", textDecoration: "none" }}>
           ← All campaigns
@@ -500,16 +541,7 @@ export function CampaignDetail({ user }: { user: AuthedUser }) {
         </p>
       </div>
 
-      {user.globalRole === "root" && <SettingsPanel campaign={campaign} onUpdated={setCampaign} />}
-
-      {canManageInvites && (
-        <>
-          <MemberManager campaignId={campaignId} isRoot={user.globalRole === "root"} />
-          <InviteManager campaignId={campaignId} canGrantDm={user.globalRole === "root"} />
-        </>
-      )}
-
-      <SchedulingSection campaign={campaign} user={user} onCampaignChanged={reloadCampaign} />
+      <CampaignTabs campaign={campaign} user={user} onCampaignChanged={reloadCampaign} />
     </div>
   );
 }

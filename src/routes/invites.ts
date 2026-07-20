@@ -4,6 +4,7 @@ import type { AppConfig } from "../types/config.js";
 import { db } from "../db/index.js";
 import { requireCampaignRole } from "../middleware/authz.js";
 import { sendInviteEmail } from "../mail/mailer.js";
+import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
 
 function generateToken(): string {
   return crypto.randomBytes(24).toString("base64url");
@@ -30,7 +31,7 @@ async function addMemberIfAbsent(campaignId: string, discordId: string, role: "D
 export async function redeemInvite(
   token: string,
   discordId: string
-): Promise<{ ok: true; campaignId: string } | { ok: false; reason: string }> {
+): Promise<{ ok: true; campaignId: string; campaignSlug: string } | { ok: false; reason: string }> {
   const invite = await db()("campaign_invites").where({ token }).first();
   if (!invite) return { ok: false, reason: "not_found" };
   if (invite.revoked_at) return { ok: false, reason: "revoked" };
@@ -40,7 +41,8 @@ export async function redeemInvite(
   await addMemberIfAbsent(invite.campaign_id, discordId, invite.role);
   await db()("campaign_invites").where({ token }).increment("uses", 1);
 
-  return { ok: true, campaignId: invite.campaign_id };
+  const campaign = await db()("campaigns").where({ id: invite.campaign_id }).first();
+  return { ok: true, campaignId: invite.campaign_id, campaignSlug: campaign.slug };
 }
 
 /**
@@ -49,6 +51,7 @@ export async function redeemInvite(
  */
 export function invitesApiRouter(cfg: AppConfig): Router {
   const router = Router();
+  router.param("campaignId", resolveCampaignParam);
 
   router.post("/campaigns/:campaignId/invites", requireCampaignRole(["DM"]), async (req, res) => {
     const { campaignId } = req.params;
@@ -143,7 +146,7 @@ export function invitePageRouter(): Router {
         res.status(410).send(`This invite link is no longer valid (${result.reason}).`);
         return;
       }
-      res.redirect(`/campaigns/${result.campaignId}`);
+      res.redirect(`/campaigns/${result.campaignSlug}`);
       return;
     }
 

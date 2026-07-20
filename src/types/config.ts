@@ -44,6 +44,13 @@ export interface AppConfig {
   };
 
   /**
+   * Dev-only auth bypass for testing without real Discord accounts. Must be
+   * explicitly enabled via env — defaults to false, never persisted to
+   * config.json, and should never be set on a production deployment.
+   */
+  devFakeLoginEnabled: boolean;
+
+  /**
    * Entirely optional. If host/user/pass aren't all set, invite creation
    * simply skips emailing and returns the link for the DM to share manually.
    */

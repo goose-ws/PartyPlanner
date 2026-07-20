@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db } from "../db/index.js";
 import { requireCampaignRole } from "../middleware/authz.js";
+import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
 
 const VALID_WEIGHTS = new Set([0, 1, 2, 3]);
 
@@ -26,6 +27,7 @@ async function resolveWritableTarget(
 
 export function availabilityRouter(): Router {
   const router = Router();
+  router.param("campaignId", resolveCampaignParam);
 
   router.get("/campaigns/:campaignId/availability/me", requireCampaignRole(["DM", "Player"]), async (req, res) => {
     const campaignId = req.params.campaignId!;

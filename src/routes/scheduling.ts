@@ -5,15 +5,42 @@ import { getCandidateDates } from "../scheduling/candidateEngine.js";
 import {
   lockSessionDate,
   cancelSession,
+  rescheduleSession,
   skipBlock,
   listSessions,
   markAbsent,
   clearAbsence,
 } from "../scheduling/sessionLifecycle.js";
 import type { AppConfig } from "../types/config.js";
+import { buildSessionIcs } from "../scheduling/ics.js";
+import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
 
 export function schedulingRouter(cfg: AppConfig): Router {
   const router = Router();
+  router.param("campaignId", resolveCampaignParam);
+
+  router.get("/campaigns/:campaignId/sessions/:sessionId/calendar.ics", requireCampaignRole(["DM", "Player"]), async (req, res) => {
+    const session = await db()("sessions")
+      .where({ id: req.params.sessionId, campaign_id: req.params.campaignId })
+      .first();
+    if (!session || (session.status !== "scheduled" && session.status !== "completed")) {
+      res.status(404).json({ error: "session_not_found_or_not_locked" });
+      return;
+    }
+    const campaign = await db()("campaigns").where({ id: req.params.campaignId }).first();
+
+    const ics = buildSessionIcs({
+      sessionId: session.id,
+      campaignName: campaign.name,
+      sessionNumber: session.session_number,
+      scheduledStartUtc: session.scheduled_start_utc,
+      scheduledEndUtc: session.scheduled_end_utc,
+    });
+
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="session-${session.session_number ?? session.id}.ics"`);
+    res.send(ics);
+  });
 
   router.get("/campaigns/:campaignId/candidates", requireCampaignRole(["DM", "Player"]), async (req, res) => {
     const months = Number(req.query.months) || cfg.scheduling.defaultWindowMonths;
@@ -53,6 +80,22 @@ export function schedulingRouter(cfg: AppConfig): Router {
     } catch (err: any) {
       const msg = err?.message ?? "cancel_failed";
       res.status(msg === "session_not_found" ? 404 : 400).json({ error: msg });
+    }
+  });
+
+  router.patch("/campaigns/:campaignId/sessions/:sessionId/reschedule", requireCampaignRole(["DM"]), async (req, res) => {
+    const date = typeof req.body?.date === "string" ? req.body.date : null;
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      res.status(400).json({ error: "invalid_date" });
+      return;
+    }
+    try {
+      await rescheduleSession(req.params.campaignId!, req.params.sessionId!, date);
+      res.status(204).end();
+    } catch (err: any) {
+      const msg = err?.message ?? "reschedule_failed";
+      const status = msg === "session_not_found" ? 404 : msg === "target_block_already_full" ? 409 : 400;
+      res.status(status).json({ error: msg });
     }
   });
 

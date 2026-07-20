@@ -7,6 +7,7 @@ export interface AuthedUser {
 
 export interface Campaign {
   id: string;
+  slug: string;
   name: string;
   start_date: string;
   cadence_type: "bi-weekly" | "custom_interval" | "weekly_static";
@@ -100,6 +101,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   me: () => request<{ user: AuthedUser }>("/api/auth/me"),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
+  devLogin: (discordId: string, username: string) =>
+    request<void>("/api/auth/dev-login", { method: "POST", body: JSON.stringify({ discordId, username }) }),
 
   listCampaigns: () => request<{ campaigns: Campaign[] }>("/api/campaigns"),
   getCampaign: (id: string) => request<{ campaign: Campaign }>(`/api/campaigns/${id}`),
@@ -133,6 +136,8 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ role }),
     }),
+  removeMember: (campaignId: string, discordId: string) =>
+    request<void>(`/api/campaigns/${campaignId}/members/${discordId}`, { method: "DELETE" }),
 
   listInvites: (campaignId: string) => request<{ invites: Invite[] }>(`/api/campaigns/${campaignId}/invites`),
   createInvite: (
@@ -159,6 +164,11 @@ export const api = {
   getSessions: (campaignId: string) => request<{ sessions: Session[] }>(`/api/campaigns/${campaignId}/sessions`),
   lockSession: (campaignId: string, date: string) =>
     request<Session>(`/api/campaigns/${campaignId}/sessions/lock`, { method: "POST", body: JSON.stringify({ date }) }),
+  rescheduleSession: (campaignId: string, sessionId: string, date: string) =>
+    request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/reschedule`, {
+      method: "PATCH",
+      body: JSON.stringify({ date }),
+    }),
   cancelSession: (campaignId: string, sessionId: string) =>
     request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/cancel`, { method: "POST" }),
   skipBlock: (campaignId: string, date: string, notes?: string) =>

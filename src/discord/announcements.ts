@@ -32,6 +32,19 @@ export async function announceSessionCancelled(campaign: AnnounceCampaign, sessi
   );
 }
 
+export async function announceSessionRescheduled(
+  campaign: AnnounceCampaign,
+  sessionNumber: number,
+  newStartUtc: Date
+): Promise<void> {
+  if (!campaign.discord_webhook_url) return;
+  const when = formatLocal(newStartUtc, campaign.timezone);
+  await sendDiscordMessage(
+    campaign.discord_webhook_url,
+    `🔁 **${campaign.name}** — Session ${sessionNumber} has been moved to **${when}**.`
+  );
+}
+
 export async function announceBlockSkipped(
   campaign: AnnounceCampaign,
   blockStart: string,

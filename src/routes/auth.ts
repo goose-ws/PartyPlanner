@@ -108,7 +108,7 @@ export function authPageRouter(cfg: AppConfig): Router {
       if (statePayload.invite) {
         const result = await redeemInvite(statePayload.invite, discordUser.id);
         if (result.ok) {
-          redirectPath = `/campaigns/${result.campaignId}`;
+          redirectPath = `/campaigns/${result.campaignSlug}`;
         }
         // Invalid/expired/exhausted invite tokens are silently ignored here —
         // the user still gets logged in, just without campaign membership.
@@ -148,6 +148,39 @@ export function authApiRouter(cfg: AppConfig): Router {
       return;
     }
     res.json({ user: req.user });
+  });
+
+  /**
+   * Dev-only: logs in as a fake user without any Discord round-trip, for
+   * testing multiple roles without real accounts. Returns 404 (not 403) when
+   * disabled, so its existence isn't advertised in a real deployment.
+   * discordId is restricted to a "test-" prefix — this can never create or
+   * touch a real Discord snowflake, and never modifies global_role, so it
+   * cannot be used to mint a fake root account even if left enabled by mistake.
+   */
+  router.post("/dev-login", async (req, res) => {
+    if (!cfg.devFakeLoginEnabled) {
+      res.status(404).end();
+      return;
+    }
+
+    const discordId = typeof req.body?.discordId === "string" ? req.body.discordId : "";
+    const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
+    if (!/^test-[a-z0-9_-]+$/.test(discordId) || !username) {
+      res.status(400).json({ error: "invalid_dev_login_payload" });
+      return;
+    }
+
+    const existing = await db()("users").where({ discord_id: discordId }).first();
+    if (existing) {
+      await db()("users").where({ discord_id: discordId }).update({ username });
+    } else {
+      await db()("users").insert({ discord_id: discordId, username, global_role: "user" });
+    }
+
+    const sid = await createSession(discordId, cfg.session.maxAgeSeconds);
+    setSessionCookie(res, cfg, sid);
+    res.status(204).end();
   });
 
   return router;

@@ -11,7 +11,7 @@ const CADENCE_LABEL: Record<Campaign["cadence_type"], string> = {
 export function CampaignCard({ campaign }: { campaign: Campaign }) {
   return (
     <Link
-      to={`/campaigns/${campaign.id}`}
+      to={`/campaigns/${campaign.slug}`}
       className="pp-card"
       style={{
         display: "flex",

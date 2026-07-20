@@ -2,7 +2,8 @@ import crypto from "node:crypto";
 import { DateTime } from "luxon";
 import { db } from "../db/index.js";
 import { addDays, type DateStr } from "./dateMath.js";
-import { announceSessionLocked, announceSessionCancelled, announceBlockSkipped } from "../discord/announcements.js";
+import { announceSessionLocked, announceSessionCancelled, announceBlockSkipped, announceSessionRescheduled } from "../discord/announcements.js";
+import { blockIndexOf } from "./candidateEngine.js";
 
 interface CampaignForLifecycle {
   id: string;
@@ -23,7 +24,7 @@ interface CampaignForLifecycle {
  * timezone math; day-level availability scoring elsewhere deliberately
  * avoids it entirely.
  */
-function localSessionWindowToUtc(
+export function localSessionWindowToUtc(
   campaign: CampaignForLifecycle,
   date: DateStr
 ): { startUtc: Date; endUtc: Date } {
@@ -113,6 +114,46 @@ export async function cancelSession(campaignId: string, sessionId: string) {
   });
 
   await announceSessionCancelled(result.campaign, result.sessionNumber);
+}
+
+/**
+ * Moves an already-locked session to a new date, keeping the same session
+ * number (unlike cancel+relock, which would churn the numbering). Blocked
+ * only if the target date's block already has a *different* locked/completed
+ * session filling its quota — the post-lock blackout window is deliberately
+ * not enforced here, since a DM explicitly rescheduling their own session is
+ * a considered decision, not the clustering the blackout guards against.
+ */
+export async function rescheduleSession(campaignId: string, sessionId: string, newDate: DateStr) {
+  const result = await db().transaction(async (trx) => {
+    const session = await trx("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
+    if (!session) throw new Error("session_not_found");
+    if (session.status !== "scheduled") throw new Error("only_scheduled_sessions_can_be_rescheduled");
+
+    const campaign: CampaignForLifecycle & { sessions_per_interval: number; blackout_days_after_lock: number } =
+      await trx("campaigns").where({ id: campaignId }).first();
+
+    const targetBlockIdx = blockIndexOf(campaign, newDate);
+    const otherSessions: Array<{ scheduled_start_utc: string; status: string }> = await trx("sessions")
+      .where({ campaign_id: campaignId })
+      .whereIn("status", ["scheduled", "completed"])
+      .whereNot({ id: sessionId });
+    const occupancy = otherSessions.filter(
+      (s) => blockIndexOf(campaign, s.scheduled_start_utc.slice(0, 10)) === targetBlockIdx
+    ).length;
+    if (occupancy >= campaign.sessions_per_interval) {
+      throw new Error("target_block_already_full");
+    }
+
+    const { startUtc, endUtc } = localSessionWindowToUtc(campaign, newDate);
+    await trx("sessions")
+      .where({ id: sessionId })
+      .update({ scheduled_start_utc: startUtc, scheduled_end_utc: endUtc });
+
+    return { campaign, sessionNumber: session.session_number as number, startUtc };
+  });
+
+  await announceSessionRescheduled(result.campaign, result.sessionNumber, result.startUtc);
 }
 
 /** Flags an entire cadence block as intentionally skipped (e.g. a holiday break). */
