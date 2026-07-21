@@ -15,11 +15,13 @@ function inviteUrl(cfg: AppConfig, token: string): string {
 }
 
 /** Adds `discordId` to `campaignId` with `role`, unless already a member. Idempotent. */
-async function addMemberIfAbsent(campaignId: string, discordId: string, role: "DM" | "Player"): Promise<void> {
+async function addMemberIfAbsent(campaignId: string, discordId: string, role: "DM" | "Player"): Promise<boolean> {
   const existing = await db()("campaign_members").where({ campaign_id: campaignId, discord_id: discordId }).first();
   if (!existing) {
     await db()("campaign_members").insert({ campaign_id: campaignId, discord_id: discordId, role });
+    return true;
   }
+  return false;
 }
 
 /**
@@ -31,18 +33,21 @@ async function addMemberIfAbsent(campaignId: string, discordId: string, role: "D
 export async function redeemInvite(
   token: string,
   discordId: string
-): Promise<{ ok: true; campaignId: string; campaignSlug: string } | { ok: false; reason: string }> {
+): Promise<
+  | { ok: true; campaignId: string; campaignSlug: string; isNewMember: boolean }
+  | { ok: false; reason: string }
+> {
   const invite = await db()("campaign_invites").where({ token }).first();
   if (!invite) return { ok: false, reason: "not_found" };
   if (invite.revoked_at) return { ok: false, reason: "revoked" };
   if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) return { ok: false, reason: "expired" };
   if (invite.max_uses !== null && invite.uses >= invite.max_uses) return { ok: false, reason: "exhausted" };
 
-  await addMemberIfAbsent(invite.campaign_id, discordId, invite.role);
+  const isNewMember = await addMemberIfAbsent(invite.campaign_id, discordId, invite.role);
   await db()("campaign_invites").where({ token }).increment("uses", 1);
 
   const campaign = await db()("campaigns").where({ id: invite.campaign_id }).first();
-  return { ok: true, campaignId: invite.campaign_id, campaignSlug: campaign.slug };
+  return { ok: true, campaignId: invite.campaign_id, campaignSlug: campaign.slug, isNewMember };
 }
 
 /**
@@ -146,7 +151,7 @@ export function invitePageRouter(): Router {
         res.status(410).send(`This invite link is no longer valid (${result.reason}).`);
         return;
       }
-      res.redirect(`/campaigns/${result.campaignSlug}`);
+      res.redirect(result.isNewMember ? `/campaigns/${result.campaignSlug}/welcome` : `/campaigns/${result.campaignSlug}`);
       return;
     }
 

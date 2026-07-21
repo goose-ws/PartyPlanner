@@ -4,6 +4,7 @@ import { useAuth } from "./hooks/useAuth";
 import { TopBar } from "./components/TopBar";
 import { Home } from "./pages/Home";
 import { CampaignDetail } from "./pages/CampaignDetail";
+import { CampaignWelcome } from "./pages/CampaignWelcome";
 import { api, ApiError } from "./api";
 
 const DEV_IDENTITIES = [
@@ -91,6 +92,7 @@ export default function App() {
           {auth.status === "authenticated" && (
             <Routes>
               <Route path="/" element={<Home user={auth.user} />} />
+              <Route path="/campaigns/:campaignId/welcome" element={<CampaignWelcome />} />
               <Route path="/campaigns/:campaignId" element={<CampaignDetail user={auth.user} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

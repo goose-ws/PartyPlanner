@@ -108,7 +108,7 @@ export function authPageRouter(cfg: AppConfig): Router {
       if (statePayload.invite) {
         const result = await redeemInvite(statePayload.invite, discordUser.id);
         if (result.ok) {
-          redirectPath = `/campaigns/${result.campaignSlug}`;
+          redirectPath = result.isNewMember ? `/campaigns/${result.campaignSlug}/welcome` : `/campaigns/${result.campaignSlug}`;
         }
         // Invalid/expired/exhausted invite tokens are silently ignored here —
         // the user still gets logged in, just without campaign membership.

@@ -56,7 +56,7 @@ function blockRangeUtcDates(campaign: CampaignForLifecycle, anyDateInBlock: Date
   return { start, end };
 }
 
-export async function lockSessionDate(campaignId: string, date: DateStr) {
+export async function lockSessionDate(campaignId: string, date: DateStr, publicUrl: string) {
   const result = await db().transaction(async (trx) => {
     const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
     if (!campaign) throw new Error("campaign_not_found");
@@ -80,7 +80,7 @@ export async function lockSessionDate(campaignId: string, date: DateStr) {
 
   // Sent after the transaction commits — a webhook hiccup shouldn't affect
   // whether the lock itself succeeded, and sendDiscordMessage never throws.
-  await announceSessionLocked(result.campaign, result.sessionNumber, result.scheduledStartUtc);
+  await announceSessionLocked(result.campaign, result.id, result.sessionNumber, result.scheduledStartUtc, result.scheduledEndUtc, publicUrl);
 
   return { id: result.id, sessionNumber: result.sessionNumber, scheduledStartUtc: result.scheduledStartUtc, scheduledEndUtc: result.scheduledEndUtc };
 }
@@ -124,7 +124,7 @@ export async function cancelSession(campaignId: string, sessionId: string) {
  * not enforced here, since a DM explicitly rescheduling their own session is
  * a considered decision, not the clustering the blackout guards against.
  */
-export async function rescheduleSession(campaignId: string, sessionId: string, newDate: DateStr) {
+export async function rescheduleSession(campaignId: string, sessionId: string, newDate: DateStr, publicUrl: string) {
   const result = await db().transaction(async (trx) => {
     const session = await trx("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
     if (!session) throw new Error("session_not_found");
@@ -150,10 +150,10 @@ export async function rescheduleSession(campaignId: string, sessionId: string, n
       .where({ id: sessionId })
       .update({ scheduled_start_utc: startUtc, scheduled_end_utc: endUtc });
 
-    return { campaign, sessionNumber: session.session_number as number, startUtc };
+    return { campaign, sessionNumber: session.session_number as number, startUtc, endUtc };
   });
 
-  await announceSessionRescheduled(result.campaign, result.sessionNumber, result.startUtc);
+  await announceSessionRescheduled(result.campaign, sessionId, result.sessionNumber, result.startUtc, result.endUtc, publicUrl);
 }
 
 /** Flags an entire cadence block as intentionally skipped (e.g. a holiday break). */
