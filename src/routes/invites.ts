@@ -30,6 +30,21 @@ async function addMemberIfAbsent(campaignId: string, discordId: string, role: "D
  * counter. Shared by both the logged-in-already path (routes below) and the
  * post-OAuth-callback path (routes/auth.ts).
  */
+/**
+ * Read-only validity check — same rules as redeemInvite (exists, not
+ * revoked, not expired, not exhausted) but never increments uses or touches
+ * membership. Used to reject a dead invite link before sending the browser
+ * through a whole Discord OAuth round-trip for nothing.
+ */
+async function checkInviteValidity(token: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const invite = await db()("campaign_invites").where({ token }).first();
+  if (!invite) return { ok: false, reason: "not_found" };
+  if (invite.revoked_at) return { ok: false, reason: "revoked" };
+  if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) return { ok: false, reason: "expired" };
+  if (invite.max_uses !== null && invite.uses >= invite.max_uses) return { ok: false, reason: "exhausted" };
+  return { ok: true };
+}
+
 export async function redeemInvite(
   token: string,
   discordId: string
@@ -155,8 +170,17 @@ export function invitePageRouter(): Router {
       return;
     }
 
-    // Not logged in — hand off to the OAuth flow, which carries the invite
-    // token through `state` and redeems it after Discord login succeeds.
+    // Not logged in — check the invite is actually alive BEFORE sending the
+    // browser through a whole Discord OAuth round-trip for a dead link.
+    // (This is a dry-run check only; the real redemption — and its own
+    // fresh validity check, in case something changed in the interim —
+    // still happens in the OAuth callback.)
+    const validity = await checkInviteValidity(token);
+    if (!validity.ok) {
+      res.status(410).send(`This invite link is no longer valid (${validity.reason}).`);
+      return;
+    }
+
     res.redirect(`/auth/login?invite=${encodeURIComponent(token)}`);
   });
 

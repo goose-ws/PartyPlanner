@@ -442,7 +442,7 @@ function CampaignTabs({
     <div style={{ display: "grid", gap: 24 }}>
       {isRoot && !campaign.myRole && <RootJoinPrompt campaignId={campaign.id} onJoined={onCampaignChanged} />}
       <WeeklyDefaultsEditor campaignId={campaign.id} onSaved={reload} />
-      <CalendarMonth candidates={candidates} blocked={blocked} sessions={sessions} onDayClick={setSelectedDate} />
+      <CalendarMonth availability={availability} candidates={candidates} blocked={blocked} sessions={sessions} onDayClick={setSelectedDate} />
       {selectedDate && (
         <DayDetailModal
           date={selectedDate}

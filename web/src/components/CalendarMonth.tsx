@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { buildMonthGrid, monthLabel, todayUtc, WEEKDAY_SHORT, addMonthsToYearMonth, type DateStr } from "../dateMath";
-import type { CandidateDate, BlockedDate, Session } from "../api";
+import type { CandidateDate, BlockedDate, Session, AvailabilityAll } from "../api";
 import { PipDisplay } from "./PipMeter";
+import { buildAvailabilityMaps, computeDayScore } from "../scheduling";
 
 const STATUS_STYLE: Record<string, { bg: string; label: string }> = {
   scheduled: { bg: "rgba(192,138,46,0.16)", label: "Locked" },
@@ -9,12 +10,37 @@ const STATUS_STYLE: Record<string, { bg: string; label: string }> = {
   skipped: { bg: "rgba(74,81,120,0.06)", label: "Skipped" },
 };
 
+function ScoreBadge({ score, isDmAvailable }: { score: number; isDmAvailable: boolean }) {
+  return (
+    <span
+      title={`Total availability score: ${score}${!isDmAvailable ? " — DM unavailable, score zeroed" : ""}`}
+      aria-label={`Score ${score}`}
+      className="pp-mono"
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        color: "white",
+        background: isDmAvailable ? "var(--pp-brass)" : "var(--pp-crimson)",
+        borderRadius: 999,
+        padding: "1px 7px",
+        minWidth: 20,
+        textAlign: "center",
+        lineHeight: 1.5,
+      }}
+    >
+      {score}
+    </span>
+  );
+}
+
 export function CalendarMonth({
+  availability,
   candidates,
   blocked,
   sessions,
   onDayClick,
 }: {
+  availability: AvailabilityAll;
   candidates: CandidateDate[];
   blocked: BlockedDate[];
   sessions: Session[];
@@ -26,6 +52,7 @@ export function CalendarMonth({
     return { year: y!, month: m! - 1 };
   });
 
+  const maps = buildAvailabilityMaps(availability);
   const candidateByDate = new Map(candidates.map((c) => [c.date, c]));
   const blockedByDate = new Map(blocked.map((b) => [b.date, b]));
   const sessionByDate = new Map(
@@ -33,7 +60,6 @@ export function CalendarMonth({
   );
 
   const cells = buildMonthGrid(ym.year, ym.month);
-  const maxScore = Math.max(1, ...candidates.map((c) => c.score));
 
   return (
     <div className="pp-card" style={{ padding: 16 }}>
@@ -62,6 +88,14 @@ export function CalendarMonth({
 
           const style = session ? STATUS_STYLE[session.status] : undefined;
 
+          // Locked/completed sessions have a real date/time, so a score is
+          // meaningful for them too — the candidates list only covers open
+          // (unlocked) dates, so this is computed independently here.
+          const sessionScore =
+            session && (session.status === "scheduled" || session.status === "completed")
+              ? computeDayScore(maps, availability.members, date)
+              : null;
+
           return (
             <button
               key={date}
@@ -69,7 +103,7 @@ export function CalendarMonth({
               disabled={isPast && !session}
               style={{
                 aspectRatio: "1",
-                minHeight: 58,
+                minHeight: 64,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -88,23 +122,15 @@ export function CalendarMonth({
               </span>
 
               {session ? (
-                <span style={{ fontSize: 9, fontWeight: 600, color: "var(--pp-ink-soft)", textAlign: "center", lineHeight: 1.2 }}>
-                  {STATUS_STYLE[session.status]?.label}
-                  {session.session_number ? ` #${session.session_number}` : ""}
-                </span>
-              ) : candidate ? (
                 <>
-                  <div
-                    style={{
-                      width: "70%",
-                      height: 3,
-                      borderRadius: 2,
-                      background: candidate.isDmAvailable ? "var(--pp-brass)" : "var(--pp-crimson)",
-                      opacity: 0.3 + 0.7 * (candidate.score / maxScore),
-                    }}
-                  />
-                  <span style={{ fontSize: 9, color: "var(--pp-ink-soft)" }}>{candidate.score}</span>
+                  {sessionScore && <ScoreBadge score={sessionScore.score} isDmAvailable={sessionScore.isDmAvailable} />}
+                  <span style={{ fontSize: 9, fontWeight: 600, color: "var(--pp-ink-soft)", textAlign: "center", lineHeight: 1.2 }}>
+                    {STATUS_STYLE[session.status]?.label}
+                    {session.session_number ? ` #${session.session_number}` : ""}
+                  </span>
                 </>
+              ) : candidate ? (
+                <ScoreBadge score={candidate.score} isDmAvailable={candidate.isDmAvailable} />
               ) : blockedEntry ? (
                 <span style={{ fontSize: 8, color: "var(--pp-ink-soft)" }}>·</span>
               ) : null}
@@ -114,6 +140,15 @@ export function CalendarMonth({
       </div>
 
       <div style={{ display: "flex", gap: 16, marginTop: 14, flexWrap: "wrap", fontSize: 11, color: "var(--pp-ink-soft)" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span
+            className="pp-mono"
+            style={{ fontSize: 10, fontWeight: 700, color: "white", background: "var(--pp-brass)", borderRadius: 999, padding: "1px 6px" }}
+          >
+            6
+          </span>{" "}
+          = total score for that date
+        </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <PipDisplay weight={3} size={6} /> Yes
         </span>

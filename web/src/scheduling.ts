@@ -25,3 +25,19 @@ export function weightFor(maps: AvailabilityMaps, discordId: string, date: DateS
   if (override !== undefined) return override;
   return maps.defaultsByMember.get(discordId)?.get(dayOfWeek(date)) ?? 0;
 }
+
+/**
+ * Computes the same score/DM-veto logic as the backend candidate engine,
+ * but for ANY date — including already-locked ones, which the candidates
+ * list deliberately excludes since it only covers open (unlocked) dates.
+ */
+export function computeDayScore(
+  maps: AvailabilityMaps,
+  members: AvailabilityAll["members"],
+  date: DateStr
+): { score: number; isDmAvailable: boolean } {
+  const dmIds = members.filter((m) => m.role === "DM").map((m) => m.discordId);
+  const isDmAvailable = dmIds.length === 0 || dmIds.every((id) => weightFor(maps, id, date) > 0);
+  const score = isDmAvailable ? members.reduce((sum, m) => sum + weightFor(maps, m.discordId, date), 0) : 0;
+  return { score, isDmAvailable };
+}
