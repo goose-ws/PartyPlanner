@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { api, type Session } from "../api";
 import { formatDateHuman } from "../dateMath";
 import { buildGoogleCalendarUrl, buildOutlookUrl, icsDownloadUrl } from "../calendarLinks";
@@ -35,6 +36,50 @@ function CalendarLinks({ session, campaignId, campaignName }: { session: Session
       <a href={ics} style={linkStyle}>
         .ics
       </a>
+    </div>
+  );
+}
+
+function RescheduleControl({ session, campaignId, onChanged }: { session: Session; campaignId: string; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [date, setDate] = useState(session.scheduled_start_utc.slice(0, 10));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function move() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.rescheduleSession(campaignId, session.id, date);
+      setOpen(false);
+      onChanged();
+    } catch (err: any) {
+      setError(err?.code === "target_block_already_full" ? "That block's already full." : "Couldn't reschedule.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button className="pp-btn pp-btn-ghost" onClick={() => setOpen(true)}>
+        Reschedule
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+      <div style={{ display: "flex", gap: 6 }}>
+        <input type="date" className="pp-input" value={date} onChange={(e) => setDate(e.target.value)} style={{ padding: "6px 8px" }} />
+        <button className="pp-btn pp-btn-ghost" disabled={busy} onClick={move}>
+          {busy ? "Moving…" : "Move"}
+        </button>
+        <button className="pp-btn pp-btn-ghost" disabled={busy} onClick={() => setOpen(false)}>
+          ✕
+        </button>
+      </div>
+      {error && <p style={{ color: "var(--pp-crimson)", fontSize: 12 }}>{error}</p>}
     </div>
   );
 }
@@ -81,15 +126,18 @@ export function SessionsList({
             )}
           </div>
           {canManage && s.status === "scheduled" && (
-            <button
-              className="pp-btn pp-btn-danger"
-              onClick={async () => {
-                await api.cancelSession(campaignId, s.id);
-                onChanged();
-              }}
-            >
-              Cancel
-            </button>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <RescheduleControl session={s} campaignId={campaignId} onChanged={onChanged} />
+              <button
+                className="pp-btn pp-btn-danger"
+                onClick={async () => {
+                  await api.cancelSession(campaignId, s.id);
+                  onChanged();
+                }}
+              >
+                Cancel
+              </button>
+            </div>
           )}
         </div>
       ))}

@@ -41,7 +41,7 @@ export function WeeklyDefaultsEditor({ campaignId, onSaved }: { campaignId: stri
   return (
     <div className="pp-card" style={{ padding: 16 }}>
       <h3 style={{ fontSize: 14, marginBottom: 10 }}>
-        Your weekly pattern {saving && <span style={{ color: "var(--pp-ink-soft)", fontWeight: 400 }}>· saving…</span>}
+        Your default weekly availability {saving && <span style={{ color: "var(--pp-ink-soft)", fontWeight: 400 }}>· saving…</span>}
       </h3>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         {WEEKDAY_SHORT.map((label, i) => (
