@@ -101,8 +101,6 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   me: () => request<{ user: AuthedUser }>("/api/auth/me"),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
-  devLogin: (discordId: string, username: string) =>
-    request<void>("/api/auth/dev-login", { method: "POST", body: JSON.stringify({ discordId, username }) }),
 
   listCampaigns: () => request<{ campaigns: Campaign[] }>("/api/campaigns"),
   getCampaign: (id: string) => request<{ campaign: Campaign }>(`/api/campaigns/${id}`),
@@ -171,6 +169,11 @@ export const api = {
     }),
   cancelSession: (campaignId: string, sessionId: string) =>
     request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/cancel`, { method: "POST" }),
+  cancelBlock: (campaignId: string, sessionId: string, notes?: string) =>
+    request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/cancel-block`, {
+      method: "POST",
+      body: JSON.stringify({ notes }),
+    }),
   skipBlock: (campaignId: string, date: string, notes?: string) =>
     request<void>(`/api/campaigns/${campaignId}/blocks/skip`, { method: "POST", body: JSON.stringify({ date, notes }) }),
 

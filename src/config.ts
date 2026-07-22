@@ -80,8 +80,6 @@ export function loadConfig(): AppConfig {
       tokenEncryptionKey: required(process.env.TOKEN_ENCRYPTION_KEY, "TOKEN_ENCRYPTION_KEY"),
     },
 
-    devFakeLoginEnabled: parseBool(process.env.DEV_FAKE_LOGIN, false),
-
     smtp: {
       host: process.env.SMTP_HOST ?? null,
       port: Number(process.env.SMTP_PORT ?? 587),

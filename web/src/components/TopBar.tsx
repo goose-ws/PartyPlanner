@@ -14,7 +14,9 @@ export function TopBar({ user, onLoggedOut }: { user: AuthedUser | null; onLogge
       {user && (
         <div className="pp-topbar-right">
           {user.globalRole === "root" && <RoleBadge role="root" />}
-          <span style={{ fontSize: 14, color: "var(--pp-ink-soft)" }}>{user.username}</span>
+          <span className="pp-topbar-username" style={{ fontSize: 14, color: "var(--pp-ink-soft)" }}>
+            {user.username}
+          </span>
           <button
             className="pp-btn pp-btn-ghost"
             onClick={async () => {

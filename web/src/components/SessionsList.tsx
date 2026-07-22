@@ -73,7 +73,7 @@ function RescheduleControl({ session, campaignId, onChanged }: { session: Sessio
       <div style={{ display: "flex", gap: 6 }}>
         <input type="date" className="pp-input" value={date} onChange={(e) => setDate(e.target.value)} style={{ padding: "6px 8px" }} />
         <button className="pp-btn pp-btn-ghost" disabled={busy} onClick={move}>
-          {busy ? "Moving…" : "Move"}
+          {busy ? "Moving…" : "Confirm"}
         </button>
         <button className="pp-btn pp-btn-ghost" disabled={busy} onClick={() => setOpen(false)}>
           ✕
@@ -129,13 +129,25 @@ export function SessionsList({
             <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
               <RescheduleControl session={s} campaignId={campaignId} onChanged={onChanged} />
               <button
-                className="pp-btn pp-btn-danger"
+                className="pp-btn pp-btn-ghost"
+                title="Reopens this block for a fresh lock"
                 onClick={async () => {
                   await api.cancelSession(campaignId, s.id);
                   onChanged();
                 }}
               >
-                Cancel
+                Unlock
+              </button>
+              <button
+                className="pp-btn pp-btn-danger"
+                title="Calls off the whole block — won't be offered again"
+                onClick={async () => {
+                  if (!confirm("This cancels the whole block, not just this date — it won't be offered again as a candidate. Continue?")) return;
+                  await api.cancelBlock(campaignId, s.id, "Cancelled from Sessions list");
+                  onChanged();
+                }}
+              >
+                Cancel block
               </button>
             </div>
           )}

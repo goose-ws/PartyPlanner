@@ -84,19 +84,28 @@ code,
   font-family: var(--pp-font-mono);
 }
 
+html, body, #root {
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+
 /* --- Layout shell --- */
 
 .pp-shell {
   min-height: 100%;
   display: flex;
   flex-direction: column;
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 .pp-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--pp-line);
   background: var(--pp-surface);
 }
@@ -111,12 +120,21 @@ code,
   letter-spacing: -0.01em;
   text-decoration: none;
   color: var(--pp-ink);
+  flex-shrink: 0;
 }
 
 .pp-topbar-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pp-topbar-username {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
 }
 
 .pp-main {
@@ -125,6 +143,13 @@ code,
   max-width: 880px;
   margin: 0 auto;
   padding: 48px 24px 80px;
+  box-sizing: border-box;
+}
+
+@media (max-width: 480px) {
+  .pp-main {
+    padding: 28px 14px 60px;
+  }
 }
 
 /* --- Buttons --- */

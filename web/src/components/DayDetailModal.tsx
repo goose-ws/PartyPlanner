@@ -61,7 +61,8 @@ export function DayDetailModal({
     }
   }
 
-  async function cancel() {
+  /** "Unlock" — reopens this date's block for a fresh lock, without ruling out playing sometime in this same window. */
+  async function unlock() {
     if (!session) return;
     setBusy(true);
     setError(null);
@@ -70,7 +71,24 @@ export function DayDetailModal({
       onChanged();
       onClose();
     } catch {
-      setError("Couldn't cancel this session.");
+      setError("Couldn't unlock this session.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** "Cancel this block" — calls off the whole window, not just this date; the block won't be offered again. */
+  async function cancelWholeBlock() {
+    if (!session) return;
+    if (!confirm("This cancels the whole block, not just this date — it won't be offered again as a candidate. Continue?")) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.cancelBlock(campaignId, session.id, "Cancelled from calendar");
+      onChanged();
+      onClose();
+    } catch {
+      setError("Couldn't cancel this block.");
     } finally {
       setBusy(false);
     }
@@ -173,34 +191,56 @@ export function DayDetailModal({
 
         {error && <p style={{ color: "var(--pp-crimson)", fontSize: 13 }}>{error}</p>}
 
+        {/* Always available, regardless of role — closing without locking/skipping/anything else is the normal path. */}
+        <div style={{ borderTop: "1px solid var(--pp-line)", paddingTop: 14, display: "flex" }}>
+          <button className="pp-btn pp-btn-primary" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
         {canManage && (
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", borderTop: "1px solid var(--pp-line)", paddingTop: 14 }}>
+          <div style={{ display: "grid", gap: 10, borderTop: "1px solid var(--pp-line)", paddingTop: 14 }}>
             {!session && candidate && (
-              <button className="pp-btn pp-btn-brass" disabled={busy} onClick={lock}>
+              <button className="pp-btn pp-btn-brass" disabled={busy} onClick={lock} style={{ justifySelf: "start" }}>
                 Lock this date
               </button>
             )}
+
             {session?.status === "scheduled" && (
               <>
-                <button className="pp-btn pp-btn-danger" disabled={busy} onClick={cancel}>
-                  Cancel session
-                </button>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input
-                    type="date"
-                    className="pp-input"
-                    value={rescheduleDate}
-                    onChange={(e) => setRescheduleDate(e.target.value)}
-                    style={{ padding: "8px 10px" }}
-                  />
-                  <button className="pp-btn pp-btn-ghost" disabled={busy || !rescheduleDate} onClick={reschedule}>
-                    Move here
+                <div className="pp-field" style={{ maxWidth: 260 }}>
+                  <label htmlFor="reschedule-date">Reschedule to a different date</label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      id="reschedule-date"
+                      type="date"
+                      className="pp-input"
+                      value={rescheduleDate}
+                      onChange={(e) => setRescheduleDate(e.target.value)}
+                    />
+                    <button className="pp-btn pp-btn-ghost" disabled={busy || !rescheduleDate} onClick={reschedule}>
+                      Reschedule
+                    </button>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button className="pp-btn pp-btn-ghost" disabled={busy} onClick={unlock} title="Reopens this block for a fresh lock">
+                    Unlock session
+                  </button>
+                  <button
+                    className="pp-btn pp-btn-danger"
+                    disabled={busy}
+                    onClick={cancelWholeBlock}
+                    title="Calls off the whole block — won't be offered again"
+                  >
+                    Cancel this block
                   </button>
                 </div>
               </>
             )}
+
             {!session && (
-              <button className="pp-btn pp-btn-ghost" disabled={busy} onClick={skip}>
+              <button className="pp-btn pp-btn-ghost" disabled={busy} onClick={skip} style={{ justifySelf: "start" }}>
                 Skip this block
               </button>
             )}

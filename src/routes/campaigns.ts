@@ -223,15 +223,35 @@ export function campaignsRouter(): Router {
       return;
     }
 
-    const updated = await db()("campaign_members")
-      .where({ campaign_id: req.params.campaignId, discord_id: req.params.discordId })
-      .update({ role });
+    const result = await db().transaction(async (trx) => {
+      const updated = await trx("campaign_members")
+        .where({ campaign_id: req.params.campaignId, discord_id: req.params.discordId })
+        .update({ role });
+      if (!updated) return null;
 
-    if (!updated) {
+      // Only one DM per campaign — promoting a new one demotes whoever
+      // currently holds it (if anyone) to Player, in the same transaction.
+      let demoted: string | null = null;
+      if (role === "DM") {
+        const priorDm = await trx("campaign_members")
+          .where({ campaign_id: req.params.campaignId, role: "DM" })
+          .whereNot({ discord_id: req.params.discordId })
+          .first();
+        if (priorDm) {
+          await trx("campaign_members")
+            .where({ campaign_id: req.params.campaignId, discord_id: priorDm.discord_id })
+            .update({ role: "Player" });
+          demoted = priorDm.discord_id;
+        }
+      }
+      return { demoted };
+    });
+
+    if (!result) {
       res.status(404).json({ error: "membership_not_found" });
       return;
     }
-    res.json({ campaignId: req.params.campaignId, discordId: req.params.discordId, role });
+    res.json({ campaignId: req.params.campaignId, discordId: req.params.discordId, role, demotedDiscordId: result.demoted });
   });
 
   // Remove a member from the campaign. Root can remove anyone; a DM can

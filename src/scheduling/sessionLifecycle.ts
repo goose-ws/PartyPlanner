@@ -117,6 +117,47 @@ export async function cancelSession(campaignId: string, sessionId: string) {
 }
 
 /**
+ * Cancels the session AND flags its entire block as skipped, in one
+ * transaction — for "we're not playing this whole block, not just moving
+ * off this date" (distinct from a plain cancel, which reopens the block for
+ * a fresh lock).
+ */
+export async function cancelBlock(campaignId: string, sessionId: string, notes: string | null) {
+  const result = await db().transaction(async (trx) => {
+    const session = await trx("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
+    if (!session) throw new Error("session_not_found");
+    if (session.status !== "scheduled") throw new Error("only_scheduled_sessions_can_be_cancelled");
+
+    const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
+    const wasLatest = session.session_number === campaign.last_session_number;
+
+    await trx("sessions").where({ id: sessionId }).update({ status: "cancelled" });
+    if (wasLatest) {
+      await trx("campaigns")
+        .where({ id: campaignId })
+        .update({ last_session_number: Math.max(0, campaign.last_session_number - 1) });
+    }
+
+    const { start, end } = blockRangeUtcDates(campaign, session.scheduled_start_utc.slice(0, 10));
+    const skipId = crypto.randomUUID();
+    await trx("sessions").insert({
+      id: skipId,
+      campaign_id: campaignId,
+      session_number: null,
+      scheduled_start_utc: `${start} 00:00:00`,
+      scheduled_end_utc: `${end} 00:00:00`,
+      status: "skipped",
+      notes,
+    });
+
+    return { campaign, blockStart: start, blockEnd: end };
+  });
+
+  const blockEndInclusive = addDays(result.blockEnd, -1); // end is exclusive
+  await announceBlockSkipped(result.campaign, result.blockStart, blockEndInclusive, notes);
+}
+
+/**
  * Moves an already-locked session to a new date, keeping the same session
  * number (unlike cancel+relock, which would churn the numbering). Blocked
  * only if the target date's block already has a *different* locked/completed

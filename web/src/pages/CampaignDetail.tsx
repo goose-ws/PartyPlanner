@@ -165,6 +165,12 @@ function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boo
   useEffect(load, [campaignId]);
 
   async function changeRole(discordId: string, role: "DM" | "Player") {
+    if (role === "DM") {
+      const priorDm = members?.find((m) => m.role === "DM" && m.discord_id !== discordId);
+      if (priorDm && !confirm(`Only one DM per campaign. This will move ${priorDm.username} to Player. Continue?`)) {
+        return;
+      }
+    }
     setPendingId(discordId);
     try {
       await api.setMemberRole(campaignId, discordId, role);

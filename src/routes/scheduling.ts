@@ -5,6 +5,7 @@ import { getCandidateDates } from "../scheduling/candidateEngine.js";
 import {
   lockSessionDate,
   cancelSession,
+  cancelBlock,
   rescheduleSession,
   skipBlock,
   listSessions,
@@ -79,6 +80,17 @@ export function schedulingRouter(cfg: AppConfig): Router {
       res.status(204).end();
     } catch (err: any) {
       const msg = err?.message ?? "cancel_failed";
+      res.status(msg === "session_not_found" ? 404 : 400).json({ error: msg });
+    }
+  });
+
+  router.post("/campaigns/:campaignId/sessions/:sessionId/cancel-block", requireCampaignRole(["DM"]), async (req, res) => {
+    const notes = typeof req.body?.notes === "string" ? req.body.notes.slice(0, 255) : null;
+    try {
+      await cancelBlock(req.params.campaignId!, req.params.sessionId!, notes);
+      res.status(204).end();
+    } catch (err: any) {
+      const msg = err?.message ?? "cancel_block_failed";
       res.status(msg === "session_not_found" ? 404 : 400).json({ error: msg });
     }
   });
