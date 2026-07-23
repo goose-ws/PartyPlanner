@@ -7,6 +7,7 @@ import { CalendarMonth } from "../components/CalendarMonth";
 import { DayDetailModal } from "../components/DayDetailModal";
 import { SessionsList } from "../components/SessionsList";
 import { StatsPanel } from "../components/StatsPanel";
+import { NextUpBanner } from "../components/NextUpBanner";
 import { Tabs } from "../components/Tabs";
 import { useSchedulingData } from "../hooks/useSchedulingData";
 import type { DateStr } from "../dateMath";
@@ -436,10 +437,17 @@ function CampaignTabs({
 }) {
   const { availability, candidates, blocked, sessions, stats, error, reload } = useSchedulingData(campaign.id);
   const [selectedDate, setSelectedDate] = useState<DateStr | null>(null);
+  const [focusDate, setFocusDate] = useState<DateStr | null>(null);
+  const [activeTab, setActiveTab] = useState("schedule");
 
   const isRoot = user.globalRole === "root";
   const isDm = campaign.myRole === "DM";
   const canManage = isRoot || isDm;
+
+  function jumpToCalendar(date: DateStr) {
+    setFocusDate(date);
+    setActiveTab("schedule");
+  }
 
   if (error) return <p style={{ color: "var(--pp-crimson)" }}>{error}</p>;
   if (!availability) return <p>Loading scheduling data…</p>;
@@ -447,8 +455,16 @@ function CampaignTabs({
   const scheduleTab = (
     <div style={{ display: "grid", gap: 24 }}>
       {isRoot && !campaign.myRole && <RootJoinPrompt campaignId={campaign.id} onJoined={onCampaignChanged} />}
+      <NextUpBanner campaign={campaign} sessions={sessions} candidates={candidates} onViewOnCalendar={jumpToCalendar} />
       <WeeklyDefaultsEditor campaignId={campaign.id} onSaved={reload} />
-      <CalendarMonth availability={availability} candidates={candidates} blocked={blocked} sessions={sessions} onDayClick={setSelectedDate} />
+      <CalendarMonth
+        availability={availability}
+        candidates={candidates}
+        blocked={blocked}
+        sessions={sessions}
+        focusDate={focusDate}
+        onDayClick={setSelectedDate}
+      />
       {selectedDate && (
         <DayDetailModal
           date={selectedDate}
@@ -466,7 +482,14 @@ function CampaignTabs({
   );
 
   const sessionsTab = (
-    <SessionsList sessions={sessions} campaignId={campaign.id} campaignName={campaign.name} canManage={canManage} onChanged={reload} />
+    <SessionsList
+      sessions={sessions}
+      campaignId={campaign.id}
+      campaignName={campaign.name}
+      canManage={canManage}
+      onChanged={reload}
+      onViewOnCalendar={jumpToCalendar}
+    />
   );
 
   const statsTab = stats ? <StatsPanel stats={stats} /> : <p>Loading stats…</p>;
@@ -497,7 +520,7 @@ function CampaignTabs({
     });
   }
 
-  return <Tabs tabs={tabs} />;
+  return <Tabs tabs={tabs} active={activeTab} onActiveChange={setActiveTab} />;
 }
 
 export function CampaignDetail({ user }: { user: AuthedUser }) {

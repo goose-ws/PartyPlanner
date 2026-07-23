@@ -74,3 +74,16 @@ export function formatDateHuman(date: DateStr): string {
   const dt = new Date(Date.UTC(y!, m! - 1, d!));
   return dt.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
+
+/** Formats a MySQL DATETIME string (always a true UTC instant in this app) in the campaign's IANA timezone. */
+export function formatInTimezone(mysqlDatetime: string, timezone: string): string {
+  const utcIso = mysqlDatetime.replace(" ", "T") + "Z";
+  return new Date(utcIso).toLocaleString(undefined, {
+    timeZone: timezone,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}

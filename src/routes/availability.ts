@@ -38,7 +38,12 @@ export function availabilityRouter(): Router {
     ]);
     res.json({
       defaults: defaults.map((d) => ({ dayOfWeek: d.day_of_week, weight: d.weight })),
-      specific: specific.map((s) => ({ date: s.date_utc, weight: s.weight })),
+      specific: specific.map((s) => ({
+        date: s.date_utc,
+        weight: s.weight,
+        joiningLate: !!s.joining_late,
+        droppingEarly: !!s.dropping_early,
+      })),
     });
   });
 
@@ -94,7 +99,7 @@ export function availabilityRouter(): Router {
     }
 
     if (weight === null) {
-      // Explicit null clears the override, reverting to the weekly default for that date.
+      // Explicit null clears the override (and any flags on it), reverting to the weekly default for that date.
       await db()("specific_availability").where({ campaign_id: campaignId, discord_id: target.targetId, date_utc: date }).delete();
       res.status(204).end();
       return;
@@ -105,10 +110,20 @@ export function availabilityRouter(): Router {
       return;
     }
 
+    const joiningLate = req.body?.joiningLate === true;
+    const droppingEarly = req.body?.droppingEarly === true;
+
     await db()("specific_availability")
-      .insert({ campaign_id: campaignId, discord_id: target.targetId, date_utc: date, weight })
+      .insert({
+        campaign_id: campaignId,
+        discord_id: target.targetId,
+        date_utc: date,
+        weight,
+        joining_late: joiningLate,
+        dropping_early: droppingEarly,
+      })
       .onConflict(["campaign_id", "discord_id", "date_utc"])
-      .merge({ weight });
+      .merge({ weight, joining_late: joiningLate, dropping_early: droppingEarly });
 
     res.status(204).end();
   });
@@ -130,7 +145,13 @@ export function availabilityRouter(): Router {
     res.json({
       members: members.map((m) => ({ discordId: m.discord_id, username: m.username, role: m.role })),
       defaults: defaults.map((d) => ({ discordId: d.discord_id, dayOfWeek: d.day_of_week, weight: d.weight })),
-      specific: specific.map((s) => ({ discordId: s.discord_id, date: s.date_utc, weight: s.weight })),
+      specific: specific.map((s) => ({
+        discordId: s.discord_id,
+        date: s.date_utc,
+        weight: s.weight,
+        joiningLate: !!s.joining_late,
+        droppingEarly: !!s.dropping_early,
+      })),
     });
   });
 

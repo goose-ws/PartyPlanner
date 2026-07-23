@@ -90,12 +90,14 @@ export function SessionsList({
   campaignName,
   canManage,
   onChanged,
+  onViewOnCalendar,
 }: {
   sessions: Session[];
   campaignId: string;
   campaignName: string;
   canManage: boolean;
   onChanged: () => void;
+  onViewOnCalendar: (date: string) => void;
 }) {
   if (sessions.length === 0) {
     return (
@@ -122,7 +124,16 @@ export function SessionsList({
               {s.notes ? ` · ${s.notes}` : ""}
             </div>
             {(s.status === "scheduled" || s.status === "completed") && (
-              <CalendarLinks session={s} campaignId={campaignId} campaignName={campaignName} />
+              <>
+                <CalendarLinks session={s} campaignId={campaignId} campaignName={campaignName} />
+                <button
+                  className="pp-btn pp-btn-ghost"
+                  style={{ marginTop: 6, fontSize: 11.5, padding: "3px 9px" }}
+                  onClick={() => onViewOnCalendar(s.scheduled_start_utc.slice(0, 10))}
+                >
+                  View on calendar
+                </button>
+              </>
             )}
           </div>
           {canManage && s.status === "scheduled" && (

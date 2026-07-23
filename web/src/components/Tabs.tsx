@@ -1,7 +1,24 @@
 import { useState, type ReactNode } from "react";
 
-export function Tabs({ tabs, defaultTab }: { tabs: Array<{ id: string; label: string; content: ReactNode }>; defaultTab?: string }) {
-  const [active, setActive] = useState(defaultTab ?? tabs[0]?.id);
+export function Tabs({
+  tabs,
+  defaultTab,
+  active: controlledActive,
+  onActiveChange,
+}: {
+  tabs: Array<{ id: string; label: string; content: ReactNode }>;
+  defaultTab?: string;
+  /** Optional — pass both to let a parent programmatically switch tabs (e.g. "view on calendar" from another tab). Omit for normal uncontrolled use. */
+  active?: string;
+  onActiveChange?: (id: string) => void;
+}) {
+  const [internalActive, setInternalActive] = useState(defaultTab ?? tabs[0]?.id);
+  const active = controlledActive ?? internalActive;
+
+  function setActive(id: string) {
+    setInternalActive(id);
+    onActiveChange?.(id);
+  }
 
   return (
     <div>

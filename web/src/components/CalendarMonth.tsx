@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { buildMonthGrid, monthLabel, todayUtc, WEEKDAY_SHORT, addMonthsToYearMonth, type DateStr } from "../dateMath";
 import type { CandidateDate, BlockedDate, Session, AvailabilityAll } from "../api";
 import { PipDisplay } from "./PipMeter";
@@ -38,12 +38,14 @@ export function CalendarMonth({
   candidates,
   blocked,
   sessions,
+  focusDate,
   onDayClick,
 }: {
   availability: AvailabilityAll;
   candidates: CandidateDate[];
   blocked: BlockedDate[];
   sessions: Session[];
+  focusDate?: DateStr | null;
   onDayClick: (date: DateStr) => void;
 }) {
   const today = todayUtc();
@@ -51,6 +53,14 @@ export function CalendarMonth({
     const [y, m] = today.split("-").map(Number);
     return { year: y!, month: m! - 1 };
   });
+
+  // Parent (e.g. the "next session/block" banner) can request the calendar
+  // jump to a specific date's month — re-runs whenever focusDate changes.
+  useEffect(() => {
+    if (!focusDate) return;
+    const [y, m] = focusDate.split("-").map(Number);
+    setYm({ year: y!, month: m! - 1 });
+  }, [focusDate]);
 
   const maps = buildAvailabilityMaps(availability);
   const candidateByDate = new Map(candidates.map((c) => [c.date, c]));
@@ -85,6 +95,7 @@ export function CalendarMonth({
           const blockedEntry = blockedByDate.get(date);
           const isPast = date < today;
           const isToday = date === today;
+          const isFocused = date === focusDate;
 
           const style = session ? STATUS_STYLE[session.status] : undefined;
 
@@ -110,7 +121,7 @@ export function CalendarMonth({
                 justifyContent: "flex-start",
                 gap: 3,
                 padding: "6px 2px",
-                border: isToday ? "1.5px solid var(--pp-brass)" : "1px solid var(--pp-line)",
+                border: isFocused ? "2px solid var(--pp-focus)" : isToday ? "1.5px solid var(--pp-brass)" : "1px solid var(--pp-line)",
                 borderRadius: 8,
                 background: style?.bg ?? "var(--pp-surface)",
                 opacity: inMonth ? (isPast && !session ? 0.4 : 1) : 0.3,

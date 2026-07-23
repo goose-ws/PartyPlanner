@@ -44,14 +44,14 @@ export interface Member {
 export interface AvailabilityAll {
   members: Member[];
   defaults: Array<{ discordId: string; dayOfWeek: number; weight: number }>;
-  specific: Array<{ discordId: string; date: string; weight: number }>;
+  specific: Array<{ discordId: string; date: string; weight: number; joiningLate: boolean; droppingEarly: boolean }>;
 }
 
 export interface CandidateDate {
   date: string;
   score: number;
   isDmAvailable: boolean;
-  breakdown: Array<{ discordId: string; weight: number }>;
+  breakdown: Array<{ discordId: string; weight: number; joiningLate: boolean; droppingEarly: boolean }>;
 }
 export interface BlockedDate {
   date: string;
@@ -151,10 +151,16 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ days, discordId }),
     }),
-  setSpecificAvailability: (campaignId: string, date: string, weight: number | null, discordId?: string) =>
+  setSpecificAvailability: (
+    campaignId: string,
+    date: string,
+    weight: number | null,
+    discordId?: string,
+    flags?: { joiningLate?: boolean; droppingEarly?: boolean }
+  ) =>
     request<void>(`/api/campaigns/${campaignId}/availability/specific`, {
       method: "PUT",
-      body: JSON.stringify({ date, weight, discordId }),
+      body: JSON.stringify({ date, weight, discordId, joiningLate: flags?.joiningLate, droppingEarly: flags?.droppingEarly }),
     }),
 
   getCandidates: (campaignId: string, months = 6) =>

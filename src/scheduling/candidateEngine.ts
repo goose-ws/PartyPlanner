@@ -15,7 +15,7 @@ export interface CandidateDate {
   date: DateStr;
   score: number;
   isDmAvailable: boolean;
-  breakdown: Array<{ discordId: string; weight: number }>;
+  breakdown: Array<{ discordId: string; weight: number; joiningLate: boolean; droppingEarly: boolean }>;
 }
 
 export interface BlockedDate {
@@ -57,25 +57,45 @@ export async function getCandidateDates(
   const defaultsRows: Array<{ discord_id: string; day_of_week: number; weight: number }> = await db()(
     "default_availability"
   ).where({ campaign_id: campaignId });
-  const specificRows: Array<{ discord_id: string; date_utc: DateStr; weight: number }> = await db()(
-    "specific_availability"
-  ).where({ campaign_id: campaignId });
+  const specificRows: Array<{
+    discord_id: string;
+    date_utc: DateStr;
+    weight: number;
+    joining_late: boolean;
+    dropping_early: boolean;
+  }> = await db()("specific_availability").where({ campaign_id: campaignId });
 
   const defaultsByMember = new Map<string, Map<number, number>>();
   for (const row of defaultsRows) {
     if (!defaultsByMember.has(row.discord_id)) defaultsByMember.set(row.discord_id, new Map());
     defaultsByMember.get(row.discord_id)!.set(row.day_of_week, row.weight);
   }
-  const specificByMember = new Map<string, Map<DateStr, number>>();
+  const specificByMember = new Map<string, Map<DateStr, { weight: number; joiningLate: boolean; droppingEarly: boolean }>>();
   for (const row of specificRows) {
     if (!specificByMember.has(row.discord_id)) specificByMember.set(row.discord_id, new Map());
-    specificByMember.get(row.discord_id)!.set(row.date_utc, row.weight);
+    specificByMember
+      .get(row.discord_id)!
+      .set(row.date_utc, { weight: row.weight, joiningLate: !!row.joining_late, droppingEarly: !!row.dropping_early });
   }
 
+  /** Raw weight (0-3), ignoring late/early flags — used for the DM-veto check and pip display. */
   function weightFor(discordId: string, date: DateStr): number {
     const override = specificByMember.get(discordId)?.get(date);
-    if (override !== undefined) return override;
+    if (override !== undefined) return override.weight;
     return defaultsByMember.get(discordId)?.get(dayOfWeek(date)) ?? 0;
+  }
+
+  function flagsFor(discordId: string, date: DateStr): { joiningLate: boolean; droppingEarly: boolean } {
+    const override = specificByMember.get(discordId)?.get(date);
+    return { joiningLate: override?.joiningLate ?? false, droppingEarly: override?.droppingEarly ?? false };
+  }
+
+  /** Actual score contribution: raw weight minus 0.5 per active flag, floored at 0. */
+  function contributionFor(discordId: string, date: DateStr): number {
+    const weight = weightFor(discordId, date);
+    const { joiningLate, droppingEarly } = flagsFor(discordId, date);
+    const deduction = (joiningLate ? 0.5 : 0) + (droppingEarly ? 0.5 : 0);
+    return Math.max(0, weight - deduction);
   }
 
   // Existing sessions drive block-fullness, skipped blocks, and blackout.
@@ -125,9 +145,12 @@ export async function getCandidateDates(
       continue;
     }
 
-    const breakdown = memberIds.map((id) => ({ discordId: id, weight: weightFor(id, date) }));
+    const breakdown = memberIds.map((id) => ({ discordId: id, weight: weightFor(id, date), ...flagsFor(id, date) }));
+    // DM veto is based on raw weight, not the flag-adjusted contribution — a
+    // DM joining late is still available for (most of) the session, so they
+    // shouldn't zero out the whole date the way an outright "No" does.
     const isDmAvailable = dmIds.length === 0 || dmIds.every((id) => weightFor(id, date) > 0);
-    const score = isDmAvailable ? breakdown.reduce((sum, b) => sum + b.weight, 0) : 0;
+    const score = isDmAvailable ? memberIds.reduce((sum, id) => sum + contributionFor(id, date), 0) : 0;
 
     candidates.push({ date, score, isDmAvailable, breakdown });
   }

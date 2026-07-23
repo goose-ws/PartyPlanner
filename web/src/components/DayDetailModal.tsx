@@ -1,9 +1,32 @@
 import { useState } from "react";
 import { api, type AvailabilityAll, type CandidateDate, type Session, type AuthedUser } from "../api";
-import { weightFor, buildAvailabilityMaps } from "../scheduling";
+import { weightFor, flagsFor, buildAvailabilityMaps } from "../scheduling";
 import { PipDisplay, WeightPicker } from "./PipMeter";
 import { RoleBadge } from "./RoleBadge";
 import { formatDateHuman, type DateStr } from "../dateMath";
+
+function FlagChip({ label, active, onToggle, disabled }: { label: string; active: boolean; onToggle: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onToggle}
+      title={active ? `${label} — click to clear` : `Mark as ${label.toLowerCase()}`}
+      style={{
+        fontSize: 10.5,
+        fontFamily: "var(--pp-font-mono)",
+        padding: "2px 8px",
+        borderRadius: 999,
+        border: `1px solid ${active ? "var(--pp-crimson)" : "var(--pp-line)"}`,
+        background: active ? "rgba(162,59,59,0.1)" : "transparent",
+        color: active ? "var(--pp-crimson)" : "var(--pp-ink-soft)",
+        cursor: disabled ? "default" : "pointer",
+      }}
+    >
+      {label}
+    </button>
+  );
+}
 
 export function DayDetailModal({
   date,
@@ -34,11 +57,14 @@ export function DayDetailModal({
   const canManage = isRoot || isDm;
   const maps = buildAvailabilityMaps(availability);
 
-  async function setWeight(discordId: string, weight: number) {
+  async function saveResponse(discordId: string, weight: number, joiningLate: boolean, droppingEarly: boolean) {
     setBusy(true);
     setError(null);
     try {
-      await api.setSpecificAvailability(campaignId, date, weight, discordId === user.discordId ? undefined : discordId);
+      await api.setSpecificAvailability(campaignId, date, weight, discordId === user.discordId ? undefined : discordId, {
+        joiningLate,
+        droppingEarly,
+      });
       onChanged();
     } catch {
       setError("Couldn't save that response.");
@@ -169,20 +195,46 @@ export function DayDetailModal({
           </button>
         </div>
 
-        <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gap: 12 }}>
           {availability.members.map((m) => {
             const w = weightFor(maps, m.discordId, date);
+            const flags = flagsFor(maps, m.discordId, date);
             const editable = m.discordId === user.discordId || canManage;
             return (
-              <div key={m.discordId} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <span style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.username}</span>
-                  <RoleBadge role={m.role} />
+              <div key={m.discordId} style={{ display: "grid", gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <span style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.username}</span>
+                    <RoleBadge role={m.role} />
+                  </div>
+                  {editable ? (
+                    <WeightPicker weight={w} onChange={(next) => saveResponse(m.discordId, next, flags.joiningLate, flags.droppingEarly)} disabled={busy} />
+                  ) : (
+                    <PipDisplay weight={w} />
+                  )}
                 </div>
-                {editable ? (
-                  <WeightPicker weight={w} onChange={(next) => setWeight(m.discordId, next)} disabled={busy} />
-                ) : (
-                  <PipDisplay weight={w} />
+                {editable && (
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    <FlagChip
+                      label="Joining late"
+                      active={flags.joiningLate}
+                      disabled={busy}
+                      onToggle={() => saveResponse(m.discordId, w, !flags.joiningLate, flags.droppingEarly)}
+                    />
+                    <FlagChip
+                      label="Dropping early"
+                      active={flags.droppingEarly}
+                      disabled={busy}
+                      onToggle={() => saveResponse(m.discordId, w, flags.joiningLate, !flags.droppingEarly)}
+                    />
+                  </div>
+                )}
+                {(flags.joiningLate || flags.droppingEarly) && !editable && (
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", fontSize: 10.5, color: "var(--pp-crimson)" }}>
+                    {flags.joiningLate && "Joining late"}
+                    {flags.joiningLate && flags.droppingEarly && " · "}
+                    {flags.droppingEarly && "Dropping early"}
+                  </div>
                 )}
               </div>
             );
