@@ -8,6 +8,7 @@ import {
   cancelBlock,
   rescheduleSession,
   skipBlock,
+  backfillSession,
   listSessions,
   markAbsent,
   clearAbsence,
@@ -57,6 +58,42 @@ export function schedulingRouter(cfg: AppConfig): Router {
   router.get("/campaigns/:campaignId/sessions", requireCampaignRole(["DM", "Player"]), async (req, res) => {
     const sessions = await listSessions(req.params.campaignId!);
     res.json({ sessions });
+  });
+
+  router.post("/campaigns/:campaignId/sessions/backfill", requireCampaignRole(["DM"]), async (req, res) => {
+    const date = typeof req.body?.date === "string" ? req.body.date : null;
+    const status = ["completed", "cancelled", "skipped"].includes(req.body?.status) ? req.body.status : "completed";
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      res.status(400).json({ error: "invalid_date" });
+      return;
+    }
+    let sessionNumber: number | null = null;
+    if (req.body?.sessionNumber !== undefined && req.body?.sessionNumber !== null) {
+      if (!Number.isInteger(req.body.sessionNumber) || req.body.sessionNumber < 1) {
+        res.status(400).json({ error: "invalid_sessionNumber" });
+        return;
+      }
+      sessionNumber = req.body.sessionNumber;
+    } else if (status === "completed") {
+      res.status(400).json({ error: "sessionNumber_required_for_completed" });
+      return;
+    }
+    const notes = typeof req.body?.notes === "string" ? req.body.notes.slice(0, 255) : null;
+    const absentDiscordIds = Array.isArray(req.body?.absentDiscordIds)
+      ? req.body.absentDiscordIds.filter((x: unknown) => typeof x === "string")
+      : [];
+
+    try {
+      const result = await backfillSession(req.params.campaignId!, { sessionNumber, date, status, notes, absentDiscordIds });
+      res.status(201).json(result);
+    } catch (err: any) {
+      if (err?.code === "ER_DUP_ENTRY") {
+        res.status(409).json({ error: "session_number_already_used" });
+        return;
+      }
+      console.error("[scheduling] backfill failed:", err);
+      res.status(500).json({ error: "backfill_failed" });
+    }
   });
 
   router.post("/campaigns/:campaignId/sessions/lock", requireCampaignRole(["DM"]), async (req, res) => {

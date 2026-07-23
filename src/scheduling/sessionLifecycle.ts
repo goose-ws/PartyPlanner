@@ -197,6 +197,55 @@ export async function rescheduleSession(campaignId: string, sessionId: string, n
   await announceSessionRescheduled(result.campaign, sessionId, result.sessionNumber, result.startUtc, result.endUtc, publicUrl);
 }
 
+/**
+ * Directly records a historical session — used to backfill sessions that
+ * happened before this tool was in use. Deliberately bypasses ALL of the
+ * forward-looking scheduling validation (block quotas, blackout, skipped
+ * blocks) since none of that applies to something that already happened;
+ * this just writes the row. Sends no Discord announcement — these are
+ * retroactive, not news. Also advances campaigns.last_session_number if the
+ * backfilled number is higher than what's on record, so future real locks
+ * continue numbering correctly from it.
+ */
+export async function backfillSession(
+  campaignId: string,
+  input: {
+    sessionNumber: number | null;
+    date: DateStr;
+    status: "completed" | "cancelled" | "skipped";
+    notes: string | null;
+    absentDiscordIds: string[];
+  }
+): Promise<{ id: string }> {
+  return db().transaction(async (trx) => {
+    const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
+    if (!campaign) throw new Error("campaign_not_found");
+
+    const { startUtc, endUtc } = localSessionWindowToUtc(campaign, input.date);
+    const id = crypto.randomUUID();
+
+    await trx("sessions").insert({
+      id,
+      campaign_id: campaignId,
+      session_number: input.sessionNumber,
+      scheduled_start_utc: startUtc,
+      scheduled_end_utc: endUtc,
+      status: input.status,
+      notes: input.notes,
+    });
+
+    if (input.sessionNumber !== null && input.sessionNumber > campaign.last_session_number) {
+      await trx("campaigns").where({ id: campaignId }).update({ last_session_number: input.sessionNumber });
+    }
+
+    for (const discordId of input.absentDiscordIds) {
+      await trx("session_absences").insert({ session_id: id, discord_id: discordId, excused: true });
+    }
+
+    return { id };
+  });
+}
+
 /** Flags an entire cadence block as intentionally skipped (e.g. a holiday break). */
 export async function skipBlock(campaignId: string, anyDateInBlock: DateStr, notes: string | null) {
   const campaign: CampaignForLifecycle = await db()("campaigns").where({ id: campaignId }).first();

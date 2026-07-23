@@ -182,6 +182,10 @@ export const api = {
     }),
   skipBlock: (campaignId: string, date: string, notes?: string) =>
     request<void>(`/api/campaigns/${campaignId}/blocks/skip`, { method: "POST", body: JSON.stringify({ date, notes }) }),
+  backfillSession: (
+    campaignId: string,
+    input: { sessionNumber: number | null; date: string; status: "completed" | "cancelled" | "skipped"; notes?: string; absentDiscordIds: string[] }
+  ) => request<{ id: string }>(`/api/campaigns/${campaignId}/sessions/backfill`, { method: "POST", body: JSON.stringify(input) }),
 
   getStats: (campaignId: string) => request<Stats>(`/api/campaigns/${campaignId}/stats`),
 };

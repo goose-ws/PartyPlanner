@@ -8,6 +8,7 @@ import { DayDetailModal } from "../components/DayDetailModal";
 import { SessionsList } from "../components/SessionsList";
 import { StatsPanel } from "../components/StatsPanel";
 import { NextUpBanner } from "../components/NextUpBanner";
+import { BackfillSessionForm } from "../components/BackfillSessionForm";
 import { Tabs } from "../components/Tabs";
 import { useSchedulingData } from "../hooks/useSchedulingData";
 import type { DateStr } from "../dateMath";
@@ -482,14 +483,17 @@ function CampaignTabs({
   );
 
   const sessionsTab = (
-    <SessionsList
-      sessions={sessions}
-      campaignId={campaign.id}
-      campaignName={campaign.name}
-      canManage={canManage}
-      onChanged={reload}
-      onViewOnCalendar={jumpToCalendar}
-    />
+    <div style={{ display: "grid", gap: 16 }}>
+      {canManage && <BackfillSessionForm campaignId={campaign.id} members={availability.members} onDone={reload} />}
+      <SessionsList
+        sessions={sessions}
+        campaignId={campaign.id}
+        campaignName={campaign.name}
+        canManage={canManage}
+        onChanged={reload}
+        onViewOnCalendar={jumpToCalendar}
+      />
+    </div>
   );
 
   const statsTab = stats ? <StatsPanel stats={stats} /> : <p>Loading stats…</p>;
