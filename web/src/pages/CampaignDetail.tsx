@@ -264,8 +264,33 @@ function SettingsPanel({
   const [webhookUrl, setWebhookUrl] = useState(campaign.discord_webhook_url ?? "");
   const [advanceDays, setAdvanceDays] = useState(campaign.reminder_advance_days);
   const [finalDays, setFinalDays] = useState(campaign.reminder_final_days);
+  const [timeOfDay, setTimeOfDay] = useState(campaign.reminder_time_of_day.slice(0, 5));
+  const [advanceEnabled, setAdvanceEnabled] = useState(campaign.reminder_advance_enabled);
+  const [finalEnabled, setFinalEnabled] = useState(campaign.reminder_final_enabled);
+  const [dayofEnabled, setDayofEnabled] = useState(campaign.reminder_dayof_enabled);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const [testingStage, setTestingStage] = useState<string | null>(null);
+
+  async function runTest(stage: "advance" | "final" | "dayof") {
+    setTestingStage(stage);
+    setTestResult(null);
+    try {
+      const res = await api.testReminder(campaign.id, stage);
+      if (!res.sent && res.reason === "nothing_to_report") {
+        setTestResult("Nothing to send right now — no open block or no one's unresponsive.");
+      } else if (!res.content) {
+        setTestResult("Couldn't compose that reminder — check there's an open block / upcoming session.");
+      } else {
+        setTestResult(res.sent ? `Sent to Discord:\n${res.content}` : `Composed but failed to send:\n${res.content}`);
+      }
+    } catch (err: any) {
+      setTestResult(err?.code === "no_webhook_configured" ? "Set a webhook URL below first, then save, before testing." : "Test failed.");
+    } finally {
+      setTestingStage(null);
+    }
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -281,6 +306,10 @@ function SettingsPanel({
         discordWebhookUrl: webhookUrl.trim() || null,
         reminderAdvanceDays: advanceDays,
         reminderFinalDays: finalDays,
+        reminderTimeOfDay: timeOfDay,
+        reminderAdvanceEnabled: advanceEnabled,
+        reminderFinalEnabled: finalEnabled,
+        reminderDayofEnabled: dayofEnabled,
       });
       onUpdated(updated);
       if (!alwaysOpen) setOpen(false);
@@ -363,6 +392,10 @@ function SettingsPanel({
             value={advanceDays}
             onChange={(e) => setAdvanceDays(Number(e.target.value))}
           />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, fontSize: 12.5 }}>
+            <input type="checkbox" checked={advanceEnabled} onChange={(e) => setAdvanceEnabled(e.target.checked)} />
+            Enabled
+          </label>
         </div>
         <div className="pp-field">
           <label htmlFor="s-final">Final-call reminder (days before)</label>
@@ -374,8 +407,46 @@ function SettingsPanel({
             value={finalDays}
             onChange={(e) => setFinalDays(Number(e.target.value))}
           />
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, fontSize: 12.5 }}>
+            <input type="checkbox" checked={finalEnabled} onChange={(e) => setFinalEnabled(e.target.checked)} />
+            Enabled
+          </label>
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-dayof-time">Reminders fire at (local time)</label>
+          <input id="s-dayof-time" type="time" className="pp-input" value={timeOfDay} onChange={(e) => setTimeOfDay(e.target.value)} />
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-dayof-enabled" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              id="s-dayof-enabled"
+              type="checkbox"
+              checked={dayofEnabled}
+              onChange={(e) => setDayofEnabled(e.target.checked)}
+            />
+            Day-of reminder enabled
+          </label>
+          <p style={{ fontSize: 11.5 }}>Announces the session + everyone's response, the day it happens.</p>
         </div>
       </div>
+      <div style={{ borderTop: "1px solid var(--pp-line)", paddingTop: 14, display: "grid", gap: 10 }}>
+        <h4 style={{ fontSize: 13, fontWeight: 600, color: "var(--pp-ink-soft)" }}>Test reminders (sends a real message to the webhook, prefixed 🧪 TEST)</h4>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" className="pp-btn pp-btn-ghost" disabled={!!testingStage} onClick={() => runTest("advance")}>
+            {testingStage === "advance" ? "Sending…" : "Test advance"}
+          </button>
+          <button type="button" className="pp-btn pp-btn-ghost" disabled={!!testingStage} onClick={() => runTest("final")}>
+            {testingStage === "final" ? "Sending…" : "Test final call"}
+          </button>
+          <button type="button" className="pp-btn pp-btn-ghost" disabled={!!testingStage} onClick={() => runTest("dayof")}>
+            {testingStage === "dayof" ? "Sending…" : "Test day-of"}
+          </button>
+        </div>
+        {testResult && (
+          <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", background: "var(--pp-bg)", padding: 10, borderRadius: 6 }}>{testResult}</pre>
+        )}
+      </div>
+
       {error && <p style={{ color: "var(--pp-crimson)", fontSize: 13 }}>{error}</p>}
       <div style={{ display: "flex", gap: 10 }}>
         <button className="pp-btn pp-btn-primary" disabled={busy} type="submit">

@@ -20,6 +20,10 @@ export interface Campaign {
   discord_webhook_url?: string | null; // present only for root — redacted otherwise
   reminder_advance_days: number;
   reminder_final_days: number;
+  reminder_time_of_day: string;
+  reminder_advance_enabled: boolean;
+  reminder_final_enabled: boolean;
+  reminder_dayof_enabled: boolean;
   myRole?: "DM" | "Player";
 }
 
@@ -120,8 +124,17 @@ export const api = {
       discordWebhookUrl: string | null;
       reminderAdvanceDays: number;
       reminderFinalDays: number;
+      reminderTimeOfDay: string;
+      reminderAdvanceEnabled: boolean;
+      reminderFinalEnabled: boolean;
+      reminderDayofEnabled: boolean;
     }>
   ) => request<Campaign>(`/api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  testReminder: (campaignId: string, stage: "advance" | "final" | "dayof") =>
+    request<{ sent: boolean; content: string | null; reason?: string }>(`/api/campaigns/${campaignId}/reminders/test`, {
+      method: "POST",
+      body: JSON.stringify({ stage }),
+    }),
   joinCampaign: (id: string, role: "DM" | "Player") =>
     request<void>(`/api/campaigns/${id}/join`, { method: "POST", body: JSON.stringify({ role }) }),
 

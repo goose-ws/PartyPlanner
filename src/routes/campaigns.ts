@@ -151,6 +151,16 @@ export function campaignsRouter(): Router {
       }
       updates.reminder_final_days = req.body.reminderFinalDays;
     }
+    if (req.body?.reminderTimeOfDay !== undefined) {
+      if (!/^\d{2}:\d{2}$/.test(req.body.reminderTimeOfDay)) {
+        res.status(400).json({ error: "reminderTimeOfDay_must_be_HH_MM" });
+        return;
+      }
+      updates.reminder_time_of_day = `${req.body.reminderTimeOfDay}:00`;
+    }
+    if (req.body?.reminderAdvanceEnabled !== undefined) updates.reminder_advance_enabled = !!req.body.reminderAdvanceEnabled;
+    if (req.body?.reminderFinalEnabled !== undefined) updates.reminder_final_enabled = !!req.body.reminderFinalEnabled;
+    if (req.body?.reminderDayofEnabled !== undefined) updates.reminder_dayof_enabled = !!req.body.reminderDayofEnabled;
 
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ error: "no_updatable_fields_provided" });

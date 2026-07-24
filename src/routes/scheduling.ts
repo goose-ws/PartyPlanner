@@ -16,6 +16,8 @@ import {
 import type { AppConfig } from "../types/config.js";
 import { buildSessionIcs } from "../scheduling/ics.js";
 import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
+import { composeStageReminder, composeDayOfReminder } from "../scheduling/reminders.js";
+import { sendDiscordMessage } from "../discord/webhook.js";
 
 export function schedulingRouter(cfg: AppConfig): Router {
   const router = Router();
@@ -187,6 +189,42 @@ export function schedulingRouter(cfg: AppConfig): Router {
       res.status(204).end();
     }
   );
+
+  router.post("/campaigns/:campaignId/reminders/test", requireCampaignRole(["DM"]), async (req, res) => {
+    const campaignId = req.params.campaignId!;
+    const stage = req.body?.stage;
+    if (!["advance", "final", "dayof"].includes(stage)) {
+      res.status(400).json({ error: "stage_must_be_advance_final_or_dayof" });
+      return;
+    }
+
+    const campaign = await db()("campaigns").where({ id: campaignId }).first();
+    if (!campaign) {
+      res.status(404).json({ error: "campaign_not_found" });
+      return;
+    }
+    if (!campaign.discord_webhook_url) {
+      res.status(400).json({ error: "no_webhook_configured" });
+      return;
+    }
+
+    const composed =
+      stage === "dayof" ? await composeDayOfReminder(campaignId) : await composeStageReminder(campaignId, stage === "final" ? 2 : 1);
+
+    if (!composed.ok) {
+      res.status(422).json({ error: composed.reason });
+      return;
+    }
+    if (!composed.content) {
+      // Valid state, but nothing to say (e.g. everyone's already responded) — still useful info, not an error.
+      res.json({ sent: false, content: null, reason: "nothing_to_report" });
+      return;
+    }
+
+    const testContent = `🧪 **TEST** (not a real reminder) — this is what the message would look like:\n${composed.content}`;
+    const result = await sendDiscordMessage(campaign.discord_webhook_url, testContent);
+    res.json({ sent: result.ok, content: composed.content });
+  });
 
   router.get("/campaigns/:campaignId/stats", requireCampaignRole(["DM", "Player"]), async (req, res) => {
     const campaignId = req.params.campaignId!;
