@@ -201,6 +201,37 @@ export const api = {
   ) => request<{ id: string }>(`/api/campaigns/${campaignId}/sessions/backfill`, { method: "POST", body: JSON.stringify(input) }),
 
   getStats: (campaignId: string) => request<Stats>(`/api/campaigns/${campaignId}/stats`),
+
+  getSetupStatus: () => request<{ complete: boolean; missing: string[] }>("/api/setup/status"),
+  completeSetup: (input: {
+    publicUrl: string;
+    dbHost: string;
+    dbPort?: string;
+    dbUser: string;
+    dbName: string;
+    dbPassword: string;
+    discordClientId: string;
+    discordClientSecret: string;
+    initialRootDiscordId: string;
+  }) => request<{ ok: true; message: string }>("/api/setup/complete", { method: "POST", body: JSON.stringify(input) }),
+
+  getCoreSettings: () => request<CoreSettings>("/api/core-settings"),
+  revealCoreSetting: (field: "dbPassword" | "discordClientSecret") =>
+    request<{ field: string; value: string }>(`/api/core-settings/reveal/${field}`),
+  updateCoreSettings: (patch: Record<string, unknown>) =>
+    request<{ ok: true; message: string }>("/api/core-settings", { method: "PATCH", body: JSON.stringify(patch) }),
 };
+
+export interface CoreSettings {
+  publicUrl: string | null;
+  port: number;
+  trustProxy: boolean;
+  db: { host: string | null; port: number; user: string | null; database: string | null; passwordSet: boolean };
+  discord: { clientId: string | null; clientSecretSet: boolean; rootDiscordId: string | null };
+  session: { cookieName: string; maxAgeSeconds: number; signingSecretSet: boolean };
+  security: { tokenEncryptionKeySet: boolean };
+  scheduling: { defaultWindowMonths: number };
+  smtp: { host: string | null; port: number; user: string | null; passwordSet: boolean; fromAddress: string; secure: boolean };
+}
 
 export { ApiError };

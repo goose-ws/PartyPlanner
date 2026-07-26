@@ -22,7 +22,7 @@ function redirectUri(cfg: AppConfig): string {
 
 export function buildAuthorizeUrl(cfg: AppConfig, state: string): string {
   const params = new URLSearchParams({
-    client_id: cfg.discord.clientId,
+    client_id: cfg.discord.clientId!, // non-null: these routes only ever run once setup is confirmed complete
     redirect_uri: redirectUri(cfg),
     response_type: "code",
     scope: "identify",
@@ -34,8 +34,8 @@ export function buildAuthorizeUrl(cfg: AppConfig, state: string): string {
 
 export async function exchangeCodeForToken(cfg: AppConfig, code: string): Promise<DiscordTokenResponse> {
   const body = new URLSearchParams({
-    client_id: cfg.discord.clientId,
-    client_secret: cfg.discord.clientSecret,
+    client_id: cfg.discord.clientId!, // non-null: these routes only ever run once setup is confirmed complete
+    client_secret: cfg.discord.clientSecret!,
     grant_type: "authorization_code",
     code,
     redirect_uri: redirectUri(cfg),
@@ -55,8 +55,8 @@ export async function exchangeCodeForToken(cfg: AppConfig, code: string): Promis
 
 export async function refreshDiscordToken(cfg: AppConfig, refreshToken: string): Promise<DiscordTokenResponse> {
   const body = new URLSearchParams({
-    client_id: cfg.discord.clientId,
-    client_secret: cfg.discord.clientSecret,
+    client_id: cfg.discord.clientId!, // non-null: these routes only ever run once setup is confirmed complete
+    client_secret: cfg.discord.clientSecret!,
     grant_type: "refresh_token",
     refresh_token: refreshToken,
   });

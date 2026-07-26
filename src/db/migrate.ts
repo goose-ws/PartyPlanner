@@ -1,4 +1,5 @@
 import { loadConfig } from "../config.js";
+import { isDbConfigured } from "../types/config.js";
 import { initDb } from "./index.js";
 import { archiveLegacyDataIfPresent } from "./legacyArchive.js";
 
@@ -8,10 +9,20 @@ import { archiveLegacyDataIfPresent } from "./legacyArchive.js";
  * 'root' role yet (e.g. they haven't logged in via Discord before).
  *
  * Invoked as a distinct step in the container entrypoint, BEFORE the web
- * server starts listening — see Dockerfile / entrypoint.sh.
+ * server starts listening — see Dockerfile / entrypoint.sh. If DB config
+ * isn't set up yet (first-run setup wizard hasn't been completed), this
+ * exits cleanly rather than failing — the server itself will boot in
+ * setup-only mode instead. Root-user seeding requires DB config too, since
+ * it can't happen without a database to write to.
  */
 async function main() {
   const cfg = loadConfig();
+
+  if (!isDbConfigured(cfg)) {
+    console.log("[migrate] Database not configured yet — skipping migrations. Complete first-run setup, then restart.");
+    return;
+  }
+
   const knex = initDb(cfg);
 
   console.log("[migrate] Checking database connectivity...");

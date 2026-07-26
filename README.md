@@ -35,19 +35,30 @@ stats, the frontend, and `.ics`/calendar export.
 
 ## First boot
 
-1. Copy `.env.example` to `.env`, fill in the required secrets (see comments
-   in that file — `openssl rand -hex 32` for the two generated keys).
-2. Register a Discord application at https://discord.com/developers/applications,
+**Easiest path — the setup wizard:**
+
+1. Register a Discord application at https://discord.com/developers/applications,
    set its OAuth2 redirect URI to `<PUBLIC_URL>/auth/callback`.
-3. `docker compose up --build`. On first boot the container:
-   - archives any legacy tables it finds,
-   - runs migrations,
-   - seeds your `INITIAL_ROOT_DISCORD_ID` as a placeholder root user (their
-     real username fills in on first Discord login),
-   - writes non-secret settings to `/app/data/config.json`.
-4. After that first boot, `INITIAL_ROOT_DISCORD_ID` and the other
-   now-persisted values can be dropped from `.env`/compose — only the four
-   secrets need to keep being supplied.
+2. Make sure a MariaDB database and user exist for the app to use (the app
+   won't create these itself — just the schema inside them).
+3. `docker compose up --build` with `.env` empty. The container boots into
+   a minimal setup-only mode — visit the app in a browser and fill in the
+   wizard (public URL, DB connection, Discord credentials, your Discord
+   user ID for root). It's saved to `/app/data/config.json` (owner-read-only;
+   secrets live here now, same trust boundary as the `.env` file it
+   replaces — see the comment at the top of that file for the reasoning).
+4. `docker compose restart partyplanner` to boot normally. Migrations run,
+   your root user gets seeded, and the app is live.
+
+**Alternative — env vars**, same as before: fill in `.env` per `.env.example`
+and skip the wizard entirely; env values always take precedence over
+`config.json` if both are set. Useful if you manage secrets externally
+(vault, CI/CD, etc.) rather than through the app's own UI.
+
+Once things are running, root can review/change everything under
+**Core Settings** in the app itself (top bar, root only) — though most
+changes there still need a container restart to take effect, since config
+is loaded once at boot.
 
 ## Reverse proxy
 

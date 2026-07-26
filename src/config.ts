@@ -1,114 +1,96 @@
-import fs from "node:fs";
-import path from "node:path";
-import type { AppConfig, PersistedConfig } from "./types/config.js";
+import crypto from "node:crypto";
+import { readStoredConfig, writeStoredConfig, getConfigPath } from "./configStore.js";
+import type { AppConfig } from "./types/config.js";
 
-const CONFIG_PATH = process.env.CONFIG_PATH ?? "/app/data/config.json";
-
-function readPersistedConfig(): Partial<PersistedConfig> {
-  try {
-    const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
-    return JSON.parse(raw) as Partial<PersistedConfig>;
-  } catch (err: any) {
-    if (err.code === "ENOENT") return {};
-    throw new Error(`Failed to read/parse config at ${CONFIG_PATH}: ${err.message}`);
-  }
+/** env > persisted config.json > null. Never throws. */
+function resolve(envVal: string | undefined, persistedVal: string | null | undefined): string | null {
+  if (envVal) return envVal;
+  if (persistedVal) return persistedVal;
+  return null;
 }
 
-function writePersistedConfig(cfg: PersistedConfig): void {
-  const dir = path.dirname(CONFIG_PATH);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
-}
-
-function required(value: string | undefined, name: string): string {
-  if (!value) {
-    throw new Error(
-      `Missing required configuration value: ${name}. Set it via environment variable on first boot ` +
-        `(non-secret values will subsequently be persisted to ${CONFIG_PATH}).`
-    );
-  }
-  return value;
-}
-
-/**
- * Resolves configuration using: env vars > existing config.json > defaults.
- * On first boot (no config.json present), writes the resolved *non-secret*
- * values to disk so future restarts don't need most env vars set.
- */
-export function loadConfig(): AppConfig {
-  const persisted = readPersistedConfig();
-  const isFirstBoot = Object.keys(persisted).length === 0;
-
-  const resolved: AppConfig = {
-    port: Number(process.env.PORT ?? persisted.port ?? 3000),
-    trustProxy: parseBool(process.env.TRUST_PROXY, persisted.trustProxy ?? true),
-    publicUrl: process.env.PUBLIC_URL ?? persisted.publicUrl ?? required(undefined, "PUBLIC_URL"),
-
-    db: {
-      host: process.env.DB_HOST ?? persisted.db?.host ?? required(undefined, "DB_HOST"),
-      port: Number(process.env.DB_PORT ?? persisted.db?.port ?? 3306),
-      user: process.env.DB_USER ?? persisted.db?.user ?? required(undefined, "DB_USER"),
-      database: process.env.DB_NAME ?? persisted.db?.database ?? required(undefined, "DB_NAME"),
-      // Secret: env only, every single boot. Never read from / written to disk.
-      password: required(process.env.DB_PASSWORD, "DB_PASSWORD"),
-    },
-
-    discord: {
-      clientId:
-        process.env.DISCORD_CLIENT_ID ?? persisted.discord?.clientId ?? required(undefined, "DISCORD_CLIENT_ID"),
-      // Secret: env only, every single boot.
-      clientSecret: required(process.env.DISCORD_CLIENT_SECRET, "DISCORD_CLIENT_SECRET"),
-      // Only needed on the very first boot to seed the root user; safe to persist the *id*
-      // (not a secret) so the env var can be dropped from compose afterwards.
-      rootDiscordId: process.env.INITIAL_ROOT_DISCORD_ID ?? persisted.discord?.rootDiscordId ?? null,
-    },
-
-    session: {
-      cookieName: process.env.SESSION_COOKIE_NAME ?? persisted.session?.cookieName ?? "pp_sid",
-      maxAgeSeconds: Number(process.env.SESSION_MAX_AGE ?? persisted.session?.maxAgeSeconds ?? 31536000),
-      // Secret: env only. Used to sign the session cookie so it can't be forged/guessed.
-      signingSecret: required(process.env.SESSION_SIGNING_SECRET, "SESSION_SIGNING_SECRET"),
-    },
-
-    scheduling: {
-      defaultWindowMonths: Number(
-        process.env.DEFAULT_WINDOW_MONTHS ?? persisted.scheduling?.defaultWindowMonths ?? 6
-      ),
-    },
-
-    security: {
-      tokenEncryptionKey: required(process.env.TOKEN_ENCRYPTION_KEY, "TOKEN_ENCRYPTION_KEY"),
-    },
-
-    smtp: {
-      host: process.env.SMTP_HOST ?? null,
-      port: Number(process.env.SMTP_PORT ?? 587),
-      user: process.env.SMTP_USER ?? null,
-      password: process.env.SMTP_PASSWORD ?? null,
-      fromAddress: process.env.SMTP_FROM ?? "Party Planner <no-reply@localhost>",
-      secure: parseBool(process.env.SMTP_SECURE, false),
-    },
-  };
-
-  if (isFirstBoot) {
-    const toPersist: PersistedConfig = {
-      port: resolved.port,
-      trustProxy: resolved.trustProxy,
-      publicUrl: resolved.publicUrl,
-      db: { host: resolved.db.host, port: resolved.db.port, user: resolved.db.user, database: resolved.db.database },
-      discord: { clientId: resolved.discord.clientId, rootDiscordId: resolved.discord.rootDiscordId },
-      session: { cookieName: resolved.session.cookieName, maxAgeSeconds: resolved.session.maxAgeSeconds },
-      scheduling: { defaultWindowMonths: resolved.scheduling.defaultWindowMonths },
-    };
-    writePersistedConfig(toPersist);
-    // eslint-disable-next-line no-console
-    console.log(`[config] First boot — wrote resolved config to ${CONFIG_PATH}`);
-  }
-
-  return resolved;
+/** Same as resolve(), but generates a random 32-byte hex value if neither source has one — for secrets that the app itself owns (session signing key, token encryption key), never for external credentials like a DB password. */
+function resolveOrGenerate(envVal: string | undefined, persistedVal: string | null | undefined): string {
+  const found = resolve(envVal, persistedVal);
+  if (found) return found;
+  return crypto.randomBytes(32).toString("hex");
 }
 
 function parseBool(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
   return value === "true" || value === "1";
+}
+
+/**
+ * Resolves configuration (env > config.json > generated-default-or-null)
+ * and persists anything newly resolved back to config.json — so a value
+ * provided via env on first boot no longer needs to stay in the
+ * environment afterward, and a freshly-generated secret is remembered
+ * rather than regenerated (and thus changed) on every restart.
+ */
+export function loadConfig(): AppConfig {
+  const stored = readStoredConfig();
+
+  const publicUrl = resolve(process.env.PUBLIC_URL, stored.publicUrl);
+  const dbHost = resolve(process.env.DB_HOST, stored.db?.host);
+  const dbUser = resolve(process.env.DB_USER, stored.db?.user);
+  const dbName = resolve(process.env.DB_NAME, stored.db?.database);
+  const dbPassword = resolve(process.env.DB_PASSWORD, stored.db?.password);
+  const discordClientId = resolve(process.env.DISCORD_CLIENT_ID, stored.discord?.clientId);
+  const discordClientSecret = resolve(process.env.DISCORD_CLIENT_SECRET, stored.discord?.clientSecret);
+  const rootDiscordId = resolve(process.env.INITIAL_ROOT_DISCORD_ID, stored.discord?.rootDiscordId);
+  const signingSecret = resolveOrGenerate(process.env.SESSION_SIGNING_SECRET, stored.session?.signingSecret);
+  const tokenEncryptionKey = resolveOrGenerate(process.env.TOKEN_ENCRYPTION_KEY, stored.security?.tokenEncryptionKey);
+
+  const resolved: AppConfig = {
+    port: Number(process.env.PORT ?? stored.port ?? 3000),
+    trustProxy: parseBool(process.env.TRUST_PROXY, stored.trustProxy ?? true),
+    publicUrl,
+
+    db: {
+      host: dbHost,
+      port: Number(process.env.DB_PORT ?? stored.db?.port ?? 3306),
+      user: dbUser,
+      database: dbName,
+      password: dbPassword,
+    },
+
+    discord: {
+      clientId: discordClientId,
+      clientSecret: discordClientSecret,
+      rootDiscordId,
+    },
+
+    session: {
+      cookieName: process.env.SESSION_COOKIE_NAME ?? stored.session?.cookieName ?? "pp_sid",
+      maxAgeSeconds: Number(process.env.SESSION_MAX_AGE ?? stored.session?.maxAgeSeconds ?? 31536000),
+      signingSecret,
+    },
+
+    security: {
+      tokenEncryptionKey,
+    },
+
+    scheduling: {
+      defaultWindowMonths: Number(process.env.DEFAULT_WINDOW_MONTHS ?? stored.scheduling?.defaultWindowMonths ?? 6),
+    },
+
+    smtp: {
+      host: process.env.SMTP_HOST ?? stored.smtp?.host ?? null,
+      port: Number(process.env.SMTP_PORT ?? stored.smtp?.port ?? 587),
+      user: process.env.SMTP_USER ?? stored.smtp?.user ?? null,
+      password: process.env.SMTP_PASSWORD ?? stored.smtp?.password ?? null,
+      fromAddress: process.env.SMTP_FROM ?? stored.smtp?.fromAddress ?? "Party Planner <no-reply@localhost>",
+      secure: parseBool(process.env.SMTP_SECURE, stored.smtp?.secure ?? false),
+    },
+  };
+
+  // Persist anything newly resolved (from env, or freshly generated) back to
+  // config.json, so subsequent boots don't need the env vars anymore and
+  // generated secrets don't silently change on restart.
+  writeStoredConfig(resolved);
+
+  console.log(`[config] Resolved configuration from env + ${getConfigPath()} (env values, where set, take precedence).`);
+
+  return resolved;
 }

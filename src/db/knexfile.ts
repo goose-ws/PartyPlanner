@@ -27,11 +27,12 @@ export function buildKnexConfig(cfg: AppConfig): Knex.Config {
   return {
     client: "mysql2",
     connection: {
-      host: cfg.db.host,
+      // Non-null: buildKnexConfig is only ever called once isDbConfigured(cfg) is true.
+      host: cfg.db.host!,
       port: cfg.db.port,
-      user: cfg.db.user,
-      password: cfg.db.password,
-      database: cfg.db.database,
+      user: cfg.db.user!,
+      password: cfg.db.password!,
+      database: cfg.db.database!,
       // DATE/DATETIME/TIMESTAMP columns come back as plain strings instead
       // of JS Date objects — Date objects carry an implicit timezone
       // interpretation that has no business anywhere near day-level

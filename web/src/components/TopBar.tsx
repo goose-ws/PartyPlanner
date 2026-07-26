@@ -14,6 +14,11 @@ export function TopBar({ user, onLoggedOut }: { user: AuthedUser | null; onLogge
       {user && (
         <div className="pp-topbar-right">
           {user.globalRole === "root" && <RoleBadge role="root" />}
+          {user.globalRole === "root" && (
+            <Link to="/core-settings" className="pp-btn pp-btn-ghost" style={{ textDecoration: "none" }}>
+              Core Settings
+            </Link>
+          )}
           <span className="pp-topbar-username" style={{ fontSize: 14, color: "var(--pp-ink-soft)" }}>
             {user.username}
           </span>

@@ -105,7 +105,7 @@ export function schedulingRouter(cfg: AppConfig): Router {
       return;
     }
     try {
-      const session = await lockSessionDate(req.params.campaignId!, date, cfg.publicUrl);
+      const session = await lockSessionDate(req.params.campaignId!, date, cfg.publicUrl!);
       res.status(201).json(session);
     } catch (err) {
       console.error("[scheduling] lock failed:", err);
@@ -141,7 +141,7 @@ export function schedulingRouter(cfg: AppConfig): Router {
       return;
     }
     try {
-      await rescheduleSession(req.params.campaignId!, req.params.sessionId!, date, cfg.publicUrl);
+      await rescheduleSession(req.params.campaignId!, req.params.sessionId!, date, cfg.publicUrl!);
       res.status(204).end();
     } catch (err: any) {
       const msg = err?.message ?? "reschedule_failed";

@@ -1,43 +1,52 @@
 /**
  * Resolved runtime configuration.
  *
- * Precedence: environment variables > /app/config.json > hardcoded defaults.
+ * Precedence: environment variables > /app/data/config.json > generated
+ * default (secrets only) > null.
  *
- * Secrets (DB password, Discord client secret, session signing secret) are
- * ALWAYS sourced from env and are never written to config.json, so the file
- * remains safe to keep around / commit to a backup after first boot.
+ * Nothing here is "env-only" anymore — everything can live in config.json,
+ * including secrets (DB password, Discord client secret, session signing
+ * secret, token encryption key). That's a deliberate tradeoff: config.json
+ * is a plaintext file on the host either way, same as the .env file it
+ * replaces, so this doesn't meaningfully change who can read these values —
+ * see the setup/first-run docs for the full reasoning. Env vars still take
+ * precedence when set, so nothing here forces you to stop using env vars if
+ * you'd rather manage secrets externally.
+ *
+ * Fields that are still `null` mean "not configured yet" — the app boots in
+ * a minimal setup-only mode until publicUrl, the db.* fields, discord.*
+ * fields, and discord.rootDiscordId are all present.
  */
 export interface AppConfig {
   port: number;
   trustProxy: boolean;
-  publicUrl: string; // e.g. https://partyplanner.example.com  (used to build the OAuth redirect_uri)
+  publicUrl: string | null; // e.g. https://partyplanner.example.com  (used to build the OAuth redirect_uri)
 
   db: {
-    host: string;
+    host: string | null;
     port: number;
-    user: string;
-    database: string;
-    password: string; // env-only, never persisted
+    user: string | null;
+    database: string | null;
+    password: string | null;
   };
 
   discord: {
-    clientId: string;
-    clientSecret: string; // env-only, never persisted
-    rootDiscordId: string | null; // seeds the first 'root' user on boot, then can be dropped from env
+    clientId: string | null;
+    clientSecret: string | null;
+    rootDiscordId: string | null; // seeds the first 'root' user on boot
   };
 
   session: {
     cookieName: string;
     maxAgeSeconds: number; // default 1 year
-    signingSecret: string; // env-only, never persisted
+    signingSecret: string; // always resolved — auto-generated if not set anywhere
   };
 
   security: {
     // 32-byte hex key used to encrypt Discord refresh tokens at rest (AES-256-GCM).
-    // env-only, never persisted. Generate with: openssl rand -hex 32
+    // Always resolved — auto-generated if not set anywhere.
     tokenEncryptionKey: string;
   };
-
 
   scheduling: {
     defaultWindowMonths: number; // how far out the calendar auto-generates (default 6)
@@ -51,32 +60,35 @@ export interface AppConfig {
     host: string | null;
     port: number;
     user: string | null;
-    password: string | null; // env-only, obviously never persisted
+    password: string | null;
     fromAddress: string;
     secure: boolean;
   };
 }
 
-/** The subset of AppConfig that is safe to persist to /app/config.json (no secrets). */
-export interface PersistedConfig {
-  port: number;
-  trustProxy: boolean;
-  publicUrl: string;
-  db: {
-    host: string;
-    port: number;
-    user: string;
-    database: string;
-  };
-  discord: {
-    clientId: string;
-    rootDiscordId: string | null;
-  };
-  session: {
-    cookieName: string;
-    maxAgeSeconds: number;
-  };
-  scheduling: {
-    defaultWindowMonths: number;
-  };
+/** True once every field required for the app to actually function is present. */
+export function isSetupComplete(cfg: AppConfig): boolean {
+  return !!(
+    cfg.publicUrl &&
+    cfg.db.host &&
+    cfg.db.user &&
+    cfg.db.database &&
+    cfg.db.password &&
+    cfg.discord.clientId &&
+    cfg.discord.clientSecret &&
+    cfg.discord.rootDiscordId
+  );
 }
+
+/** True once the DB connection itself is configured — enough to run migrations, even if Discord/root setup isn't done yet. */
+export function isDbConfigured(cfg: AppConfig): boolean {
+  return !!(cfg.db.host && cfg.db.user && cfg.db.database && cfg.db.password);
+}
+
+/**
+ * Everything in AppConfig is potentially persistable to config.json now —
+ * this is just AppConfig's shape again, kept as a distinct alias so the
+ * intent (this is specifically "what's stored on disk") stays legible at
+ * call sites even though the shape is identical.
+ */
+export type StoredConfig = AppConfig;
