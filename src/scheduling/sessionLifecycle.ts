@@ -103,7 +103,15 @@ export async function cancelSession(campaignId: string, sessionId: string) {
     const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
     const wasLatest = session.session_number === campaign.last_session_number;
 
-    await trx("sessions").where({ id: sessionId }).update({ status: "cancelled" });
+    // When it was the latest, the number is actually released for reuse —
+    // so the row can't keep holding it, or the next lock's insert collides
+    // with it under the (campaign_id, session_number) uniqueness constraint.
+    // A non-latest cancellation keeps its number as a historical marker,
+    // since the counter isn't rolled back in that case and nothing will
+    // try to reuse that specific number.
+    await trx("sessions")
+      .where({ id: sessionId })
+      .update({ status: "cancelled", session_number: wasLatest ? null : session.session_number });
     if (wasLatest) {
       await trx("campaigns")
         .where({ id: campaignId })
@@ -131,7 +139,9 @@ export async function cancelBlock(campaignId: string, sessionId: string, notes: 
     const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
     const wasLatest = session.session_number === campaign.last_session_number;
 
-    await trx("sessions").where({ id: sessionId }).update({ status: "cancelled" });
+    await trx("sessions")
+      .where({ id: sessionId })
+      .update({ status: "cancelled", session_number: wasLatest ? null : session.session_number });
     if (wasLatest) {
       await trx("campaigns")
         .where({ id: campaignId })
