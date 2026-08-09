@@ -664,7 +664,9 @@ function CampaignTabs({
         blocked={blocked}
         sessions={sessions}
         focusDate={focusDate}
+        currentUserId={user.discordId}
         onDayClick={setSelectedDate}
+        onChanged={reload}
       />
       {selectedDate && (
         <DayDetailModal

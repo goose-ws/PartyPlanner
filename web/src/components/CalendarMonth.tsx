@@ -2,13 +2,39 @@ import { useEffect, useState } from "react";
 import { buildMonthGrid, monthLabel, todayUtc, WEEKDAY_SHORT, addMonthsToYearMonth, type DateStr } from "../dateMath";
 import type { CandidateDate, BlockedDate, Session, AvailabilityAll, Campaign } from "../api";
 import { PipDisplay } from "./PipMeter";
-import { buildAvailabilityMaps, computeDayScore } from "../scheduling";
+import { buildAvailabilityMaps, computeDayScore, weightFor, flagsFor, type AvailabilityMaps } from "../scheduling";
+import { api } from "../api";
+
+const WEIGHT_DOT_COLOR = [
+  "var(--pp-crimson)",   // No
+  "var(--pp-ink-faint)", // Maybe
+  "var(--pp-brass)",     // If
+  "#2f9e5c",             // Yes
+];
+
+const WEIGHT_SHORT = ["No", "Maybe", "If", "Yes"];
 
 const STATUS_STYLE: Record<string, { bg: string; label: string }> = {
   scheduled: { bg: "rgba(192,138,46,0.16)", label: "Locked" },
   completed: { bg: "rgba(74,81,120,0.10)", label: "Played" },
   skipped: { bg: "rgba(74,81,120,0.06)", label: "Skipped" },
 };
+
+/** Resolves base numeric weight along with any active modifier (Late/Early) */
+function getResponseDetails(
+  maps: AvailabilityMaps,
+  discordId: string,
+  date: DateStr
+): { weight: number; modifier: "Late" | "Early" | null } {
+  const weight = weightFor(maps, discordId, date);
+  const flags = flagsFor(maps, discordId, date);
+
+  let modifier: "Late" | "Early" | null = null;
+  if (flags.joiningLate) modifier = "Late";
+  else if (flags.droppingEarly) modifier = "Early";
+
+  return { weight, modifier };
+}
 
 function ScoreBadge({
   score,
@@ -43,6 +69,34 @@ function ScoreBadge({
   );
 }
 
+/** Small text badge showing the CURRENT user's base response (Yes/If/Mb/No) + modifier (Late/Early) */
+function YourResponseDot({ weight, modifier }: { weight: number; modifier: "Late" | "Early" | null }) {
+  const baseLabel = WEIGHT_SHORT[weight];
+  const color = WEIGHT_DOT_COLOR[weight];
+
+  if (!baseLabel) return null;
+
+  const displayText = modifier ? `${baseLabel} (${modifier})` : baseLabel;
+
+  return (
+    <span
+      title={`Your response: ${displayText}`}
+      style={{
+        position: "absolute",
+        top: 3,
+        right: 4,
+        fontSize: 8.5,
+        fontWeight: 700,
+        color: color,
+        lineHeight: 1,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {displayText}
+    </span>
+  );
+}
+
 export function CalendarMonth({
   campaign,
   availability,
@@ -50,7 +104,9 @@ export function CalendarMonth({
   blocked,
   sessions,
   focusDate,
+  currentUserId,
   onDayClick,
+  onChanged,
 }: {
   campaign: Campaign;
   availability: AvailabilityAll;
@@ -58,16 +114,19 @@ export function CalendarMonth({
   blocked: BlockedDate[];
   sessions: Session[];
   focusDate?: DateStr | null;
+  currentUserId: string;
   onDayClick: (date: DateStr) => void;
+  onChanged: () => void;
 }) {
   const today = todayUtc();
   const [ym, setYm] = useState(() => {
     const [y, m] = today.split("-").map(Number);
     return { year: y!, month: m! - 1 };
   });
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedDates, setSelectedDates] = useState<Set<DateStr>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
 
-  // Parent (e.g. the "next session/block" banner) can request the calendar
-  // jump to a specific date's month — re-runs whenever focusDate changes.
   useEffect(() => {
     if (!focusDate) return;
     const [y, m] = focusDate.split("-").map(Number);
@@ -81,13 +140,32 @@ export function CalendarMonth({
     sessions.filter((s) => s.status !== "cancelled").map((s) => [s.scheduled_start_utc.slice(0, 10), s])
   );
 
-  // Heatmap denominator: the highest score a date could theoretically get if
-  // every non-excluded member said an unqualified "Yes" — a fixed ceiling
-  // rather than "the best day currently on screen", so a given score always
-  // reads as the same shade no matter which month you're looking at.
   const maxPossibleScore = Math.max(1, availability.members.filter((m) => !m.excludedFromScoring).length * 3);
-
   const cells = buildMonthGrid(ym.year, ym.month);
+
+  function toggleSelect(date: DateStr, disabled: boolean) {
+    if (disabled) return;
+    setSelectedDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
+  }
+
+  async function bulkApply(weight: number) {
+    setBulkBusy(true);
+    try {
+      await Promise.all(
+        [...selectedDates].map((date) => api.setSpecificAvailability(campaign.id, date, weight))
+      );
+      setSelectedDates(new Set());
+      setSelectMode(false);
+      onChanged();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   return (
     <div className="pp-card" style={{ padding: 16 }}>
@@ -111,7 +189,51 @@ export function CalendarMonth({
         <button className="pp-btn pp-btn-ghost" onClick={() => setYm(addMonthsToYearMonth(ym.year, ym.month, 1))}>
           →
         </button>
+        <button
+          className="pp-btn pp-btn-ghost"
+          style={{ fontSize: 12, padding: "4px 10px" }}
+          onClick={() => {
+            setSelectMode((v) => !v);
+            setSelectedDates(new Set());
+          }}
+        >
+          {selectMode ? "Cancel" : "Select days"}
+        </button>
       </div>
+
+      {selectMode && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            flexWrap: "wrap",
+            marginBottom: 12,
+            padding: "8px 10px",
+            background: "var(--pp-bg)",
+            borderRadius: 8,
+          }}
+        >
+          <span style={{ fontSize: 12.5, color: "var(--pp-ink-soft)" }}>
+            {selectedDates.size === 0 ? "Tap days to select them" : `${selectedDates.size} day${selectedDates.size === 1 ? "" : "s"} selected`}
+          </span>
+          {selectedDates.size > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginLeft: "auto" }}>
+              {WEIGHT_SHORT.map((label, weight) => (
+                <button
+                  key={weight}
+                  className="pp-btn pp-btn-ghost"
+                  disabled={bulkBusy}
+                  style={{ fontSize: 12, padding: "4px 10px" }}
+                  onClick={() => bulkApply(weight)}
+                >
+                  Set {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 4 }}>
         {WEEKDAY_SHORT.map((d) => (
@@ -128,28 +250,25 @@ export function CalendarMonth({
           const isFocused = date === focusDate;
 
           const style = session ? STATUS_STYLE[session.status] : undefined;
-          // Open (unlocked) candidate days get a heat wash instead of a flat
-          // white background, so the best options visibly pop out from the
-          // rest without having to read every badge — locked/completed/
-          // skipped days keep their existing distinct status tint instead,
-          // since "what happened" matters more there than "how good was it".
           const heatIntensity = candidate ? Math.min(1, candidate.score / maxPossibleScore) : 0;
           const heatBg = candidate ? `rgba(192, 138, 46, ${(heatIntensity * 0.5).toFixed(3)})` : undefined;
 
-          // Locked/completed sessions have a real date/time, so a score is
-          // meaningful for them too — the candidates list only covers open
-          // (unlocked) dates, so this is computed independently here.
           const sessionScore =
             session && (session.status === "scheduled" || session.status === "completed")
               ? computeDayScore(maps, availability.members, date, campaign.min_players_required)
               : null;
 
+          const isDisabledForEdit = isPast && !session;
+          const isSelected = selectedDates.has(date);
+          const { weight, modifier } = getResponseDetails(maps, currentUserId, date);
+
           return (
             <button
               key={date}
-              onClick={() => onDayClick(date)}
-              disabled={isPast && !session}
+              onClick={() => (selectMode ? toggleSelect(date, isDisabledForEdit) : onDayClick(date))}
+              disabled={isDisabledForEdit && !selectMode}
               style={{
+                position: "relative",
                 aspectRatio: "1",
                 minHeight: 64,
                 display: "flex",
@@ -158,14 +277,21 @@ export function CalendarMonth({
                 justifyContent: "flex-start",
                 gap: 3,
                 padding: "6px 2px",
-                border: isFocused ? "2px solid var(--pp-focus)" : isToday ? "1.5px solid var(--pp-brass)" : "1px solid var(--pp-line)",
+                border: isSelected
+                  ? "2px solid var(--pp-focus)"
+                  : isFocused
+                    ? "2px solid var(--pp-focus)"
+                    : isToday
+                      ? "1.5px solid var(--pp-brass)"
+                      : "1px solid var(--pp-line)",
                 borderRadius: 8,
-                background: style?.bg ?? heatBg ?? "var(--pp-surface)",
-                opacity: inMonth ? (isPast && !session ? 0.4 : 1) : 0.3,
-                cursor: isPast && !session ? "default" : "pointer",
+                background: isSelected ? "rgba(47,111,237,0.10)" : style?.bg ?? heatBg ?? "var(--pp-surface)",
+                opacity: inMonth ? (isDisabledForEdit && !selectMode ? 0.4 : 1) : 0.3,
+                cursor: isDisabledForEdit && !selectMode ? "default" : "pointer",
                 overflow: "hidden",
               }}
             >
+              {inMonth && <YourResponseDot weight={weight} modifier={modifier} />}
               <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-soft)" }}>
                 {Number(date.slice(8, 10))}
               </span>
@@ -227,6 +353,10 @@ export function CalendarMonth({
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <PipDisplay weight={0} size={6} />
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: "var(--pp-brass)" }}>Yes (Late)</span>
+          badge in corner = your response
         </span>
         <span>Tap a day for details</span>
       </div>

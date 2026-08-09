@@ -1,5 +1,9 @@
 # Changelog
 
+## v2.0.1
+
+Added bulk date editing, at a glance per-date indicators for one's own status.
+
 ## v2.0.0
 
 A major release — availability confirmation workflow, richer Discord integration, and a round of scheduling/numbering fixes. Includes several DB migrations; back up your database before upgrading.
