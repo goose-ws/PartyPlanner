@@ -10,6 +10,7 @@ import { sessionMiddleware } from "./middleware/session.js";
 import { authPageRouter, authApiRouter } from "./routes/auth.js";
 import { campaignsRouter } from "./routes/campaigns.js";
 import { invitesApiRouter, invitePageRouter } from "./routes/invites.js";
+import { confirmPageRouter } from "./routes/confirm.js";
 import { availabilityRouter } from "./routes/availability.js";
 import { schedulingRouter } from "./routes/scheduling.js";
 import { setupRouter } from "./routes/setup.js";
@@ -70,6 +71,7 @@ if (!isSetupComplete(cfg)) {
   // intentionally don't collide with any React Router page.
   app.use("/auth", authPageRouter(cfg));
   app.use("/", invitePageRouter());
+  app.use("/", confirmPageRouter(cfg));
 
   // JSON-only endpoints, fetched by the SPA. Everything here lives under
   // /api specifically so it can never collide with a client-side route again
@@ -82,7 +84,7 @@ if (!isSetupComplete(cfg)) {
   app.use("/api", coreSettingsRouter(cfg));
   app.use("/api", setupRouter(cfg)); // /setup/status still reports complete:true here, for the frontend's single status check
 
-  serveSpaFallback(["/api", "/auth", "/invite/", "/healthz"]);
+  serveSpaFallback(["/api", "/auth", "/invite/", "/confirm/", "/healthz"]);
 
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error("[server] Unhandled error:", err);
@@ -100,9 +102,9 @@ if (!isSetupComplete(cfg)) {
   // so this is safe across restarts and doesn't need its own persistence.
   const REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // hourly
   setTimeout(() => {
-    runReminderCheck().catch((err) => console.error("[reminders] Initial check failed:", err));
+    runReminderCheck(cfg).catch((err) => console.error("[reminders] Initial check failed:", err));
     setInterval(() => {
-      runReminderCheck().catch((err) => console.error("[reminders] Scheduled check failed:", err));
+      runReminderCheck(cfg).catch((err) => console.error("[reminders] Scheduled check failed:", err));
     }, REMINDER_CHECK_INTERVAL_MS);
   }, 30_000); // wait 30s after boot so DB connections are warmed up first
 }

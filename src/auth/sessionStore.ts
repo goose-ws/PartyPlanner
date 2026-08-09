@@ -44,7 +44,7 @@ export async function resolveSession(
     .andWhere("user_sessions.expires", ">", db().fn.now())
     .select(
       "users.discord_id",
-      "users.username",
+      db().raw("COALESCE(users.global_name, users.username) as username"),
       "users.global_role",
       "users.timezone",
       "user_sessions.expires"

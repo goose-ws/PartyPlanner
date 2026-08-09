@@ -8,6 +8,7 @@ import { DayDetailModal } from "../components/DayDetailModal";
 import { SessionsList } from "../components/SessionsList";
 import { StatsPanel } from "../components/StatsPanel";
 import { NextUpBanner } from "../components/NextUpBanner";
+import { BlockConfirmation } from "../components/BlockConfirmation";
 import { BackfillSessionForm } from "../components/BackfillSessionForm";
 import { Tabs } from "../components/Tabs";
 import { useSchedulingData } from "../hooks/useSchedulingData";
@@ -64,7 +65,6 @@ function InviteRow({ invite, onRevoke }: { invite: Invite; onRevoke: () => void 
 function InviteManager({ campaignId, canGrantDm }: { campaignId: string; canGrantDm: boolean }) {
   const [invites, setInvites] = useState<Invite[] | null>(null);
   const [role, setRole] = useState<"Player" | "DM">("Player");
-  const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -82,8 +82,7 @@ function InviteManager({ campaignId, canGrantDm }: { campaignId: string; canGran
     setBusy(true);
     setError(null);
     try {
-      await api.createInvite(campaignId, { role, email: email.trim() || undefined });
-      setEmail("");
+      await api.createInvite(campaignId, { role });
       load();
     } catch {
       setError("Couldn't create the invite.");
@@ -102,7 +101,7 @@ function InviteManager({ campaignId, canGrantDm }: { campaignId: string; canGran
       <h2 style={{ fontSize: 17 }}>Invites</h2>
 
       <form onSubmit={create} className="pp-card" style={{ padding: 18, display: "grid", gap: 12 }}>
-        <div style={{ display: "grid", gridTemplateColumns: canGrantDm ? "auto 1fr auto" : "1fr auto", gap: 12, alignItems: "end" }}>
+        <div style={{ display: "grid", gridTemplateColumns: canGrantDm ? "auto auto" : "auto", gap: 12, alignItems: "end" }}>
           {canGrantDm && (
             <div className="pp-field">
               <label htmlFor="invite-role">Role</label>
@@ -117,17 +116,6 @@ function InviteManager({ campaignId, canGrantDm }: { campaignId: string; canGran
               </select>
             </div>
           )}
-          <div className="pp-field">
-            <label htmlFor="invite-email">Email (optional)</label>
-            <input
-              id="invite-email"
-              type="email"
-              className="pp-input"
-              placeholder="Only if you want it emailed"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </div>
           <button className="pp-btn pp-btn-primary" disabled={busy} type="submit">
             {busy ? "Creating…" : "Create link"}
           </button>
@@ -151,9 +139,9 @@ function InviteManager({ campaignId, canGrantDm }: { campaignId: string; canGran
 }
 
 function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boolean }) {
-  const [members, setMembers] = useState<{ discord_id: string; username: string; role: "DM" | "Player" }[] | null>(
-    null
-  );
+  const [members, setMembers] = useState<
+    { discord_id: string; username: string; role: "DM" | "Player"; excluded_from_scoring: boolean }[] | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
 
@@ -179,6 +167,18 @@ function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boo
       load();
     } catch {
       setError("Couldn't update that member's role.");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  async function toggleExclusion(discordId: string, currentlyExcluded: boolean) {
+    setPendingId(discordId);
+    try {
+      await api.setMemberExclusion(campaignId, discordId, !currentlyExcluded);
+      load();
+    } catch {
+      setError("Couldn't update that member's scoring exclusion.");
     } finally {
       setPendingId(null);
     }
@@ -214,11 +214,38 @@ function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boo
             <div
               key={m.discord_id}
               className="pp-card"
-              style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+              style={{
+                padding: "12px 16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+                flexWrap: "wrap",
+                opacity: m.excluded_from_scoring ? 0.7 : 1,
+              }}
             >
-              <span style={{ fontSize: 14 }}>{m.username}</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {m.username}
+              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                {m.excluded_from_scoring && (
+                  <span
+                    className="pp-mono"
+                    title="This member's responses are ignored by all scoring calculations"
+                    style={{ fontSize: 10, color: "var(--pp-ink-soft)", fontStyle: "italic" }}
+                  >
+                    excluded from scoring
+                  </span>
+                )}
                 <RoleBadge role={m.role} />
+                <button
+                  className="pp-btn pp-btn-ghost"
+                  disabled={pendingId === m.discord_id}
+                  onClick={() => toggleExclusion(m.discord_id, m.excluded_from_scoring)}
+                  title="DM/root-only: ignore this member's availability in all scoring calculations campaign-wide"
+                >
+                  {pendingId === m.discord_id ? "Updating…" : m.excluded_from_scoring ? "Include in scoring" : "Exclude from scoring"}
+                </button>
                 {isRoot && (
                   <button
                     className="pp-btn pp-btn-ghost"
@@ -261,6 +288,8 @@ function SettingsPanel({
   const [timezone, setTimezone] = useState(campaign.timezone);
   const [intervalWeeks, setIntervalWeeks] = useState(campaign.interval_weeks);
   const [sessionsPerInterval, setSessionsPerInterval] = useState(campaign.sessions_per_interval);
+  const [blackoutDaysAfterLock, setBlackoutDaysAfterLock] = useState(campaign.blackout_days_after_lock);
+  const [minPlayersRequired, setMinPlayersRequired] = useState(campaign.min_players_required);
   const [webhookUrl, setWebhookUrl] = useState(campaign.discord_webhook_url ?? "");
   const [advanceDays, setAdvanceDays] = useState(campaign.reminder_advance_days);
   const [finalDays, setFinalDays] = useState(campaign.reminder_final_days);
@@ -268,6 +297,9 @@ function SettingsPanel({
   const [advanceEnabled, setAdvanceEnabled] = useState(campaign.reminder_advance_enabled);
   const [finalEnabled, setFinalEnabled] = useState(campaign.reminder_final_enabled);
   const [dayofEnabled, setDayofEnabled] = useState(campaign.reminder_dayof_enabled);
+  const [lockWarningDays, setLockWarningDays] = useState(campaign.reminder_lock_warning_days);
+  const [lockWarningEnabled, setLockWarningEnabled] = useState(campaign.reminder_lock_warning_enabled);
+  const [confirmAheadSessions, setConfirmAheadSessions] = useState(campaign.confirm_ahead_sessions);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -286,7 +318,17 @@ function SettingsPanel({
         setTestResult(res.sent ? `Sent to Discord:\n${res.content}` : `Composed but failed to send:\n${res.content}`);
       }
     } catch (err: any) {
-      setTestResult(err?.code === "no_webhook_configured" ? "Set a webhook URL below first, then save, before testing." : "Test failed.");
+      let message = "Test failed — an unexpected error occurred.";
+      if (err?.code === "no_webhook_configured") {
+        message = "Set a webhook URL below first, then save, before testing.";
+      } else if (err?.code === "no_upcoming_session") {
+        message = "There's no upcoming session date yet — lock in a session on the calendar before testing the day-of reminder.";
+      } else if (err?.code === "no_open_block") {
+        message = "There's no open scheduling window right now — the advance/final reminders only have something to test once a block is open for availability.";
+      } else if (err?.code === "campaign_not_found") {
+        message = "Couldn't find this campaign — try refreshing the page.";
+      }
+      setTestResult(message);
     } finally {
       setTestingStage(null);
     }
@@ -303,6 +345,8 @@ function SettingsPanel({
         timezone,
         intervalWeeks,
         sessionsPerInterval,
+        blackoutDaysAfterLock,
+        minPlayersRequired,
         discordWebhookUrl: webhookUrl.trim() || null,
         reminderAdvanceDays: advanceDays,
         reminderFinalDays: finalDays,
@@ -310,6 +354,9 @@ function SettingsPanel({
         reminderAdvanceEnabled: advanceEnabled,
         reminderFinalEnabled: finalEnabled,
         reminderDayofEnabled: dayofEnabled,
+        reminderLockWarningDays: lockWarningDays,
+        reminderLockWarningEnabled: lockWarningEnabled,
+        confirmAheadSessions,
       });
       onUpdated(updated);
       if (!alwaysOpen) setOpen(false);
@@ -331,7 +378,7 @@ function SettingsPanel({
   return (
     <form onSubmit={save} className="pp-card" style={{ padding: 18, display: "grid", gap: 14 }}>
       <h3 style={{ fontSize: 15 }}>Campaign settings</h3>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
         <div className="pp-field">
           <label htmlFor="s-start">Session start</label>
           <input id="s-start" type="time" className="pp-input" value={start} onChange={(e) => setStart(e.target.value)} />
@@ -371,6 +418,51 @@ function SettingsPanel({
             value={sessionsPerInterval}
             onChange={(e) => setSessionsPerInterval(Number(e.target.value))}
           />
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-blackout">Blackout days after a lock</label>
+          <input
+            id="s-blackout"
+            type="number"
+            min={0}
+            className="pp-input"
+            value={blackoutDaysAfterLock}
+            onChange={(e) => setBlackoutDaysAfterLock(Number(e.target.value))}
+          />
+          <p style={{ fontSize: 11, color: "var(--pp-ink-soft)", marginTop: 3 }}>
+            Dates within this many days after any locked session are hidden as candidates — a cooldown before the next
+            block reopens. Set to 0 to disable.
+          </p>
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-minplayers">Minimum players required</label>
+          <input
+            id="s-minplayers"
+            type="number"
+            min={0}
+            className="pp-input"
+            value={minPlayersRequired}
+            onChange={(e) => setMinPlayersRequired(Number(e.target.value))}
+          />
+          <p style={{ fontSize: 11, color: "var(--pp-ink-soft)", marginTop: 3 }}>
+            Dates with fewer available players than this score 0, same as a DM veto. Excluded members don't count
+            toward this headcount either way. Set to 0 to disable.
+          </p>
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-confirm-ahead">Confirm-ahead window (blocks)</label>
+          <input
+            id="s-confirm-ahead"
+            type="number"
+            min={1}
+            className="pp-input"
+            value={confirmAheadSessions}
+            onChange={(e) => setConfirmAheadSessions(Number(e.target.value))}
+          />
+          <p style={{ fontSize: 11, color: "var(--pp-ink-soft)", marginTop: 3 }}>
+            How many upcoming open blocks players can confirm at once — 1 is just the next block; higher lets a table
+            that plans further out confirm several sessions' worth of availability in one sitting.
+          </p>
         </div>
         <div className="pp-field" style={{ gridColumn: "1 / -1" }}>
           <label htmlFor="s-webhook">Discord webhook URL (optional)</label>
@@ -413,20 +505,43 @@ function SettingsPanel({
           </label>
         </div>
         <div className="pp-field">
+          <label htmlFor="s-lock-warning">Unlocked-block warning (days before)</label>
+          <input
+            id="s-lock-warning"
+            type="number"
+            min={0}
+            className="pp-input"
+            value={lockWarningDays}
+            onChange={(e) => setLockWarningDays(Number(e.target.value))}
+          />
+          <p style={{ fontSize: 11, color: "var(--pp-ink-soft)", marginTop: 3 }}>
+            Pings the DM if no session has been locked in yet for the upcoming block. Only fires if nothing's locked.
+          </p>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, fontSize: 12.5 }}>
+            <input type="checkbox" checked={lockWarningEnabled} onChange={(e) => setLockWarningEnabled(e.target.checked)} />
+            Enabled
+          </label>
+        </div>
+        <div className="pp-field">
           <label htmlFor="s-dayof-time">Reminders fire at (local time)</label>
           <input id="s-dayof-time" type="time" className="pp-input" value={timeOfDay} onChange={(e) => setTimeOfDay(e.target.value)} />
         </div>
         <div className="pp-field">
-          <label htmlFor="s-dayof-enabled" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <label htmlFor="s-dayof-enabled" style={{ fontWeight: 600 }}>
+            Day of Reminder
+          </label>
+          <p style={{ fontSize: 11.5, marginTop: 2, marginBottom: 6 }}>
+            Announces the session + everyone's response, the day it happens.
+          </p>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, fontSize: 12.5 }}>
             <input
               id="s-dayof-enabled"
               type="checkbox"
               checked={dayofEnabled}
               onChange={(e) => setDayofEnabled(e.target.checked)}
             />
-            Day-of reminder enabled
+            Enabled
           </label>
-          <p style={{ fontSize: 11.5 }}>Announces the session + everyone's response, the day it happens.</p>
         </div>
       </div>
       <div style={{ borderTop: "1px solid var(--pp-line)", paddingTop: 14, display: "grid", gap: 10 }}>
@@ -443,7 +558,19 @@ function SettingsPanel({
           </button>
         </div>
         {testResult && (
-          <pre style={{ fontSize: 12, whiteSpace: "pre-wrap", background: "var(--pp-bg)", padding: 10, borderRadius: 6 }}>{testResult}</pre>
+          <pre
+            style={{
+              fontSize: 12,
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+              maxWidth: "100%",
+              background: "var(--pp-bg)",
+              padding: 10,
+              borderRadius: 6,
+            }}
+          >
+            {testResult}
+          </pre>
         )}
       </div>
 
@@ -528,8 +655,10 @@ function CampaignTabs({
     <div style={{ display: "grid", gap: 24 }}>
       {isRoot && !campaign.myRole && <RootJoinPrompt campaignId={campaign.id} onJoined={onCampaignChanged} />}
       <NextUpBanner campaign={campaign} sessions={sessions} candidates={candidates} onViewOnCalendar={jumpToCalendar} />
+      <BlockConfirmation campaignId={campaign.id} members={availability.members} canManage={canManage} />
       <WeeklyDefaultsEditor campaignId={campaign.id} onSaved={reload} />
       <CalendarMonth
+        campaign={campaign}
         availability={availability}
         candidates={candidates}
         blocked={blocked}

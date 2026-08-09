@@ -51,19 +51,6 @@ export interface AppConfig {
   scheduling: {
     defaultWindowMonths: number; // how far out the calendar auto-generates (default 6)
   };
-
-  /**
-   * Entirely optional. If host/user/pass aren't all set, invite creation
-   * simply skips emailing and returns the link for the DM to share manually.
-   */
-  smtp: {
-    host: string | null;
-    port: number;
-    user: string | null;
-    password: string | null;
-    fromAddress: string;
-    secure: boolean;
-  };
 }
 
 /** True once every field required for the app to actually function is present. */

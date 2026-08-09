@@ -1,12 +1,15 @@
 import crypto from "node:crypto";
 import { DateTime } from "luxon";
+import type { Knex } from "knex";
 import { db } from "../db/index.js";
 import { addDays, type DateStr } from "./dateMath.js";
 import { announceSessionLocked, announceSessionCancelled, announceBlockSkipped, announceSessionRescheduled } from "../discord/announcements.js";
 import { blockIndexOf } from "./candidateEngine.js";
+import { logAudit } from "../audit.js";
 
 interface CampaignForLifecycle {
   id: string;
+  slug: string;
   name: string;
   start_date: DateStr;
   interval_weeks: number;
@@ -15,6 +18,37 @@ interface CampaignForLifecycle {
   timezone: string;
   last_session_number: number;
   discord_webhook_url: string | null;
+}
+
+/**
+ * Re-derives session_number for every completed/scheduled session in a
+ * campaign, purely from chronological date order (1, 2, 3, ... — no gaps).
+ * Cancelled/skipped sessions are excluded entirely and keep session_number
+ * null; they don't occupy a slot in the sequence. Called after anything
+ * that could change which sessions are numbered or their relative order
+ * (backfill, cancel, reschedule), so the numbering never needs manual
+ * bookkeeping or produces stale/orphaned numbers.
+ *
+ * Two-phase update (temporary negative placeholders, then final values) —
+ * a straight ascending pass would collide with itself under the
+ * (campaign_id, session_number) uniqueness constraint whenever a session's
+ * new number is still held by another row that hasn't been updated yet.
+ */
+async function renumberSessions(trx: Knex.Transaction, campaignId: string): Promise<void> {
+  const ordered: Array<{ id: string }> = await trx("sessions")
+    .where({ campaign_id: campaignId })
+    .whereIn("status", ["scheduled", "completed"])
+    .orderBy("scheduled_start_utc", "asc")
+    .select("id");
+
+  for (let i = 0; i < ordered.length; i++) {
+    await trx("sessions").where({ id: ordered[i]!.id }).update({ session_number: -(i + 1) });
+  }
+  for (let i = 0; i < ordered.length; i++) {
+    await trx("sessions").where({ id: ordered[i]!.id }).update({ session_number: i + 1 });
+  }
+
+  await trx("campaigns").where({ id: campaignId }).update({ last_session_number: ordered.length });
 }
 
 /**
@@ -56,7 +90,7 @@ function blockRangeUtcDates(campaign: CampaignForLifecycle, anyDateInBlock: Date
   return { start, end };
 }
 
-export async function lockSessionDate(campaignId: string, date: DateStr, publicUrl: string) {
+export async function lockSessionDate(campaignId: string, date: DateStr, publicUrl: string, actorDiscordId: string) {
   const result = await db().transaction(async (trx) => {
     const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
     if (!campaign) throw new Error("campaign_not_found");
@@ -81,47 +115,34 @@ export async function lockSessionDate(campaignId: string, date: DateStr, publicU
   // Sent after the transaction commits — a webhook hiccup shouldn't affect
   // whether the lock itself succeeded, and sendDiscordMessage never throws.
   await announceSessionLocked(result.campaign, result.id, result.sessionNumber, result.scheduledStartUtc, result.scheduledEndUtc, publicUrl);
+  await logAudit("session.locked", {
+    campaignId,
+    actorDiscordId,
+    detail: { sessionId: result.id, sessionNumber: result.sessionNumber, date },
+  });
 
   return { id: result.id, sessionNumber: result.sessionNumber, scheduledStartUtc: result.scheduledStartUtc, scheduledEndUtc: result.scheduledEndUtc };
 }
 
 /**
- * Cancels a scheduled session. If it was the most recently assigned number,
- * that number is released back (campaigns.last_session_number decrements),
- * so the next successful lock reuses it — matching "Session 12 gets
- * cancelled, the next successful session is still Session 12". If an
- * earlier (non-latest) session is cancelled instead, its number is left as
- * a historical marker rather than risking a collision with numbers already
- * assigned after it.
+ * Cancels a scheduled session and compacts the remaining numbered sessions
+ * so there's never a gap or a stale/orphaned number left behind.
  */
-export async function cancelSession(campaignId: string, sessionId: string) {
+export async function cancelSession(campaignId: string, sessionId: string, actorDiscordId: string) {
   const result = await db().transaction(async (trx) => {
     const session = await trx("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
     if (!session) throw new Error("session_not_found");
     if (session.status !== "scheduled") throw new Error("only_scheduled_sessions_can_be_cancelled");
 
+    await trx("sessions").where({ id: sessionId }).update({ status: "cancelled", session_number: null });
+    await renumberSessions(trx, campaignId);
+
     const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
-    const wasLatest = session.session_number === campaign.last_session_number;
-
-    // When it was the latest, the number is actually released for reuse —
-    // so the row can't keep holding it, or the next lock's insert collides
-    // with it under the (campaign_id, session_number) uniqueness constraint.
-    // A non-latest cancellation keeps its number as a historical marker,
-    // since the counter isn't rolled back in that case and nothing will
-    // try to reuse that specific number.
-    await trx("sessions")
-      .where({ id: sessionId })
-      .update({ status: "cancelled", session_number: wasLatest ? null : session.session_number });
-    if (wasLatest) {
-      await trx("campaigns")
-        .where({ id: campaignId })
-        .update({ last_session_number: Math.max(0, campaign.last_session_number - 1) });
-    }
-
     return { campaign, sessionNumber: session.session_number as number };
   });
 
   await announceSessionCancelled(result.campaign, result.sessionNumber);
+  await logAudit("session.cancelled", { campaignId, actorDiscordId, detail: { sessionId, sessionNumber: result.sessionNumber } });
 }
 
 /**
@@ -130,25 +151,17 @@ export async function cancelSession(campaignId: string, sessionId: string) {
  * off this date" (distinct from a plain cancel, which reopens the block for
  * a fresh lock).
  */
-export async function cancelBlock(campaignId: string, sessionId: string, notes: string | null) {
+export async function cancelBlock(campaignId: string, sessionId: string, notes: string | null, actorDiscordId: string) {
   const result = await db().transaction(async (trx) => {
     const session = await trx("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
     if (!session) throw new Error("session_not_found");
     if (session.status !== "scheduled") throw new Error("only_scheduled_sessions_can_be_cancelled");
 
-    const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
-    const wasLatest = session.session_number === campaign.last_session_number;
+    const campaignForBlock: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
 
-    await trx("sessions")
-      .where({ id: sessionId })
-      .update({ status: "cancelled", session_number: wasLatest ? null : session.session_number });
-    if (wasLatest) {
-      await trx("campaigns")
-        .where({ id: campaignId })
-        .update({ last_session_number: Math.max(0, campaign.last_session_number - 1) });
-    }
+    await trx("sessions").where({ id: sessionId }).update({ status: "cancelled", session_number: null });
 
-    const { start, end } = blockRangeUtcDates(campaign, session.scheduled_start_utc.slice(0, 10));
+    const { start, end } = blockRangeUtcDates(campaignForBlock, session.scheduled_start_utc.slice(0, 10));
     const skipId = crypto.randomUUID();
     await trx("sessions").insert({
       id: skipId,
@@ -160,11 +173,14 @@ export async function cancelBlock(campaignId: string, sessionId: string, notes: 
       notes,
     });
 
+    await renumberSessions(trx, campaignId);
+    const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
     return { campaign, blockStart: start, blockEnd: end };
   });
 
   const blockEndInclusive = addDays(result.blockEnd, -1); // end is exclusive
   await announceBlockSkipped(result.campaign, result.blockStart, blockEndInclusive, notes);
+  await logAudit("block.skipped", { campaignId, actorDiscordId, detail: { sessionId, blockStart: result.blockStart, notes } });
 }
 
 /**
@@ -175,14 +191,17 @@ export async function cancelBlock(campaignId: string, sessionId: string, notes: 
  * not enforced here, since a DM explicitly rescheduling their own session is
  * a considered decision, not the clustering the blackout guards against.
  */
-export async function rescheduleSession(campaignId: string, sessionId: string, newDate: DateStr, publicUrl: string) {
+export async function rescheduleSession(campaignId: string, sessionId: string, newDate: DateStr, publicUrl: string, actorDiscordId: string) {
   const result = await db().transaction(async (trx) => {
     const session = await trx("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
     if (!session) throw new Error("session_not_found");
     if (session.status !== "scheduled") throw new Error("only_scheduled_sessions_can_be_rescheduled");
 
-    const campaign: CampaignForLifecycle & { sessions_per_interval: number; blackout_days_after_lock: number } =
-      await trx("campaigns").where({ id: campaignId }).first();
+    const campaign: CampaignForLifecycle & {
+      sessions_per_interval: number;
+      blackout_days_after_lock: number;
+      min_players_required: number;
+    } = await trx("campaigns").where({ id: campaignId }).first();
 
     const targetBlockIdx = blockIndexOf(campaign, newDate);
     const otherSessions: Array<{ scheduled_start_utc: string; status: string }> = await trx("sessions")
@@ -201,10 +220,17 @@ export async function rescheduleSession(campaignId: string, sessionId: string, n
       .where({ id: sessionId })
       .update({ scheduled_start_utc: startUtc, scheduled_end_utc: endUtc });
 
-    return { campaign, sessionNumber: session.session_number as number, startUtc, endUtc };
+    // The date change can shift this session's chronological position
+    // relative to the others, so its number may no longer be correct —
+    // recompute the whole sequence rather than assume it's unaffected.
+    await renumberSessions(trx, campaignId);
+    const updated = await trx("sessions").where({ id: sessionId }).first();
+
+    return { campaign, sessionNumber: updated.session_number as number, startUtc, endUtc };
   });
 
   await announceSessionRescheduled(result.campaign, sessionId, result.sessionNumber, result.startUtc, result.endUtc, publicUrl);
+  await logAudit("session.rescheduled", { campaignId, actorDiscordId, detail: { sessionId, sessionNumber: result.sessionNumber, newDate } });
 }
 
 /**
@@ -213,21 +239,25 @@ export async function rescheduleSession(campaignId: string, sessionId: string, n
  * forward-looking scheduling validation (block quotas, blackout, skipped
  * blocks) since none of that applies to something that already happened;
  * this just writes the row. Sends no Discord announcement — these are
- * retroactive, not news. Also advances campaigns.last_session_number if the
- * backfilled number is higher than what's on record, so future real locks
- * continue numbering correctly from it.
+ * retroactive, not news.
+ *
+ * No session number is taken as input — "completed" backfills are slotted
+ * into the timeline by date and the whole sequence is renumbered from
+ * scratch, so a session backfilled earlier than existing ones correctly
+ * bumps everything after it rather than erroring on a number collision.
+ * Cancelled/skipped backfills never get a number at all.
  */
 export async function backfillSession(
   campaignId: string,
   input: {
-    sessionNumber: number | null;
     date: DateStr;
     status: "completed" | "cancelled" | "skipped";
     notes: string | null;
     absentDiscordIds: string[];
-  }
-): Promise<{ id: string }> {
-  return db().transaction(async (trx) => {
+  },
+  actorDiscordId: string
+): Promise<{ id: string; sessionNumber: number | null }> {
+  const result = await db().transaction(async (trx) => {
     const campaign: CampaignForLifecycle = await trx("campaigns").where({ id: campaignId }).first();
     if (!campaign) throw new Error("campaign_not_found");
 
@@ -237,27 +267,38 @@ export async function backfillSession(
     await trx("sessions").insert({
       id,
       campaign_id: campaignId,
-      session_number: input.sessionNumber,
+      session_number: null, // assigned below by renumberSessions if this is a "completed" backfill
       scheduled_start_utc: startUtc,
       scheduled_end_utc: endUtc,
       status: input.status,
       notes: input.notes,
     });
 
-    if (input.sessionNumber !== null && input.sessionNumber > campaign.last_session_number) {
-      await trx("campaigns").where({ id: campaignId }).update({ last_session_number: input.sessionNumber });
-    }
-
     for (const discordId of input.absentDiscordIds) {
       await trx("session_absences").insert({ session_id: id, discord_id: discordId, excused: true });
     }
 
-    return { id };
+    let sessionNumber: number | null = null;
+    if (input.status === "completed") {
+      await renumberSessions(trx, campaignId);
+      const inserted = await trx("sessions").where({ id }).first();
+      sessionNumber = inserted.session_number;
+    }
+
+    return { id, sessionNumber };
   });
+
+  await logAudit("session.backfilled", {
+    campaignId,
+    actorDiscordId,
+    detail: { sessionId: result.id, sessionNumber: result.sessionNumber, date: input.date, status: input.status },
+  });
+
+  return result;
 }
 
 /** Flags an entire cadence block as intentionally skipped (e.g. a holiday break). */
-export async function skipBlock(campaignId: string, anyDateInBlock: DateStr, notes: string | null) {
+export async function skipBlock(campaignId: string, anyDateInBlock: DateStr, notes: string | null, actorDiscordId: string) {
   const campaign: CampaignForLifecycle = await db()("campaigns").where({ id: campaignId }).first();
   if (!campaign) throw new Error("campaign_not_found");
 
@@ -275,6 +316,7 @@ export async function skipBlock(campaignId: string, anyDateInBlock: DateStr, not
 
   const blockEndInclusive = addDays(end, -1); // end is exclusive
   await announceBlockSkipped(campaign, start, blockEndInclusive, notes);
+  await logAudit("block.skipped", { campaignId, actorDiscordId, detail: { blockStart: start, notes } });
 
   return { id, blockStart: start, blockEnd: end };
 }

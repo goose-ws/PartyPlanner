@@ -20,9 +20,11 @@ export function CampaignCard({ campaign }: { campaign: Campaign }) {
         padding: "18px 20px",
         textDecoration: "none",
         color: "inherit",
+        gap: 12,
+        flexWrap: "wrap",
       }}
     >
-      <div>
+      <div style={{ minWidth: 0 }}>
         <h3 style={{ fontSize: 16 }}>{campaign.name}</h3>
         <p className="pp-mono" style={{ fontSize: 12.5, marginTop: 4 }}>
           {CADENCE_LABEL[campaign.cadence_type]} · anchored {campaign.start_date}

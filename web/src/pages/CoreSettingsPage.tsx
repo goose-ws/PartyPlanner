@@ -1,6 +1,94 @@
 import { useEffect, useState } from "react";
 import { api, type CoreSettings } from "../api";
 
+function AuditLogViewer() {
+  const [entries, setEntries] = useState<
+    Array<{ id: number; campaignId: string | null; actorDiscordId: string | null; event: string; detail: Record<string, unknown> | null; createdAt: string }>
+  >([]);
+  const [eventFilter, setEventFilter] = useState("");
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+
+  function load(reset: boolean) {
+    setLoading(true);
+    const before = reset ? undefined : entries[entries.length - 1]?.id;
+    api
+      .getAuditLog({ event: eventFilter || undefined, before })
+      .then((res) => {
+        setEntries(reset ? res.entries : [...entries, ...res.entries]);
+        setHasMore(res.entries.length === 100);
+      })
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => load(true), [eventFilter]);
+
+  return (
+    <div className="pp-card" style={{ padding: 18, display: "grid", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <h3 style={{ fontSize: 15 }}>Audit Log</h3>
+        <input
+          className="pp-input"
+          style={{ maxWidth: 240 }}
+          placeholder="Filter by event, e.g. session.locked"
+          value={eventFilter}
+          onChange={(e) => setEventFilter(e.target.value)}
+        />
+      </div>
+      <p style={{ fontSize: 12, color: "var(--pp-ink-soft)" }}>
+        Every mutating action across every campaign — session locks/cancels, invites, membership changes, availability
+        edits, confirmations, reminders sent. Kept in the database rather than relying on container log retention, so
+        it survives log rotation and restarts.
+      </p>
+      <div style={{ display: "grid", gap: 4 }}>
+        {entries.length === 0 && !loading && <p style={{ fontSize: 13, color: "var(--pp-ink-soft)" }}>No matching entries.</p>}
+        {entries.map((e) => (
+          <div key={e.id} style={{ borderBottom: "1px solid var(--pp-line)", padding: "8px 0" }}>
+            <div
+              style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", cursor: "pointer" }}
+              onClick={() => setExpandedId(expandedId === e.id ? null : e.id)}
+            >
+              <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-faint)", minWidth: 145 }}>
+                {new Date(e.createdAt).toLocaleString()}
+              </span>
+              <span
+                className="pp-mono"
+                style={{ fontSize: 11, fontWeight: 700, background: "var(--pp-bg)", border: "1px solid var(--pp-line)", borderRadius: 4, padding: "1px 6px" }}
+              >
+                {e.event}
+              </span>
+              {e.actorDiscordId && (
+                <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-soft)" }}>
+                  by {e.actorDiscordId}
+                </span>
+              )}
+              {e.campaignId && (
+                <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-faint)" }}>
+                  campaign {e.campaignId.slice(0, 8)}…
+                </span>
+              )}
+            </div>
+            {expandedId === e.id && e.detail && (
+              <pre
+                className="pp-mono"
+                style={{ fontSize: 11, background: "var(--pp-bg)", padding: 10, borderRadius: 6, marginTop: 6, overflowX: "auto" }}
+              >
+                {JSON.stringify(e.detail, null, 2)}
+              </pre>
+            )}
+          </div>
+        ))}
+      </div>
+      {hasMore && entries.length > 0 && (
+        <button type="button" className="pp-btn pp-btn-ghost" disabled={loading} onClick={() => load(false)}>
+          {loading ? "Loading…" : "Load more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function RevealableField({
   isSet,
   field,
@@ -167,6 +255,8 @@ export function CoreSettingsPage() {
           </button>
         </div>
       </div>
+
+      <AuditLogViewer />
     </div>
   );
 }

@@ -3,7 +3,6 @@ import { api, type Member } from "../api";
 
 export function BackfillSessionForm({ campaignId, members, onDone }: { campaignId: string; members: Member[]; onDone: () => void }) {
   const [open, setOpen] = useState(false);
-  const [sessionNumber, setSessionNumber] = useState("");
   const [date, setDate] = useState("");
   const [status, setStatus] = useState<"completed" | "cancelled" | "skipped">("completed");
   const [notes, setNotes] = useState("");
@@ -27,24 +26,18 @@ export function BackfillSessionForm({ campaignId, members, onDone }: { campaignI
     setError(null);
     try {
       await api.backfillSession(campaignId, {
-        sessionNumber: sessionNumber ? Number(sessionNumber) : null,
         date,
         status,
         notes: notes || undefined,
         absentDiscordIds: [...absent],
       });
-      setSessionNumber("");
       setDate("");
       setNotes("");
       setAbsent(new Set());
       setOpen(false);
       onDone();
-    } catch (err: any) {
-      setError(
-        err?.code === "session_number_already_used"
-          ? "That session number's already in use."
-          : "Couldn't save that session — check the fields and try again."
-      );
+    } catch {
+      setError("Couldn't save that session — check the fields and try again.");
     } finally {
       setBusy(false);
     }
@@ -61,19 +54,11 @@ export function BackfillSessionForm({ campaignId, members, onDone }: { campaignI
   return (
     <form onSubmit={submit} className="pp-card" style={{ padding: 18, display: "grid", gap: 14 }}>
       <h3 style={{ fontSize: 15 }}>Backfill a past session</h3>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-        <div className="pp-field">
-          <label htmlFor="bf-number">Session #{status !== "completed" && " (optional)"}</label>
-          <input
-            id="bf-number"
-            type="number"
-            min={1}
-            className="pp-input"
-            value={sessionNumber}
-            onChange={(e) => setSessionNumber(e.target.value)}
-            placeholder="e.g. 7"
-          />
-        </div>
+      <p style={{ fontSize: 12, marginTop: -6 }}>
+        Party Planner figures out the session number from the date — no need to specify one, and existing sessions
+        renumber automatically if this one falls earlier in the timeline.
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
         <div className="pp-field">
           <label htmlFor="bf-date">Date</label>
           <input id="bf-date" type="date" className="pp-input" value={date} onChange={(e) => setDate(e.target.value)} />

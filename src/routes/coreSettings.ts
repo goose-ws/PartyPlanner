@@ -44,14 +44,6 @@ export function coreSettingsRouter(cfg: AppConfig): Router {
       scheduling: {
         defaultWindowMonths: cfg.scheduling.defaultWindowMonths,
       },
-      smtp: {
-        host: cfg.smtp.host,
-        port: cfg.smtp.port,
-        user: cfg.smtp.user,
-        passwordSet: !!cfg.smtp.password,
-        fromAddress: cfg.smtp.fromAddress,
-        secure: cfg.smtp.secure,
-      },
     });
   });
 
@@ -87,16 +79,6 @@ export function coreSettingsRouter(cfg: AppConfig): Router {
         ...(b.initialRootDiscordId !== undefined && { rootDiscordId: b.initialRootDiscordId }),
       };
     }
-    if (b.smtpHost !== undefined || b.smtpPort !== undefined || b.smtpUser !== undefined || b.smtpPassword !== undefined || b.smtpFrom !== undefined) {
-      patch.smtp = {
-        ...(b.smtpHost !== undefined && { host: b.smtpHost || null }),
-        ...(b.smtpPort !== undefined && { port: Number(b.smtpPort) }),
-        ...(b.smtpUser !== undefined && { user: b.smtpUser || null }),
-        ...(b.smtpPassword !== undefined && { password: b.smtpPassword || null }),
-        ...(b.smtpFrom !== undefined && { fromAddress: b.smtpFrom }),
-      };
-    }
-
     // Regenerating the session signing secret logs everyone out immediately
     // (existing cookies stop verifying). Regenerating the token encryption
     // key makes existing stored Discord refresh tokens undecryptable, so we
@@ -117,6 +99,33 @@ export function coreSettingsRouter(cfg: AppConfig): Router {
 
     writeStoredConfig(patch);
     res.json({ ok: true, message: "Saved to config.json. Restart the container for changes to take effect." });
+  });
+
+  /**
+   * Root-only. Cursor-paginated by id (via `before`) rather than offset —
+   * cheap and stable even as new rows keep being inserted between page
+   * loads. `campaignId`/`event` are optional filters for narrowing down
+   * when tracking down something specific.
+   */
+  router.get("/audit-log", requireRoot, async (req, res) => {
+    const limit = 100;
+    let query = db()("audit_log").orderBy("id", "desc").limit(limit);
+    if (typeof req.query.campaignId === "string") query = query.where({ campaign_id: req.query.campaignId });
+    if (typeof req.query.event === "string") query = query.where({ event: req.query.event });
+    if (typeof req.query.before === "string" && /^\d+$/.test(req.query.before)) {
+      query = query.where("id", "<", Number(req.query.before));
+    }
+    const rows = await query;
+    res.json({
+      entries: rows.map((r) => ({
+        id: r.id,
+        campaignId: r.campaign_id,
+        actorDiscordId: r.actor_discord_id,
+        event: r.event,
+        detail: r.detail ? JSON.parse(r.detail) : null,
+        createdAt: r.created_at,
+      })),
+    });
   });
 
   return router;

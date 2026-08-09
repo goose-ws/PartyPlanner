@@ -3,8 +3,8 @@ import crypto from "node:crypto";
 import type { AppConfig } from "../types/config.js";
 import { db } from "../db/index.js";
 import { requireCampaignRole } from "../middleware/authz.js";
-import { sendInviteEmail } from "../mail/mailer.js";
 import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
+import { logAudit } from "../audit.js";
 
 function generateToken(): string {
   return crypto.randomBytes(24).toString("base64url");
@@ -62,6 +62,11 @@ export async function redeemInvite(
   await db()("campaign_invites").where({ token }).increment("uses", 1);
 
   const campaign = await db()("campaigns").where({ id: invite.campaign_id }).first();
+  await logAudit("invite.redeemed", {
+    campaignId: invite.campaign_id,
+    actorDiscordId: discordId,
+    detail: { token, role: invite.role, isNewMember },
+  });
   return { ok: true, campaignId: invite.campaign_id, campaignSlug: campaign.slug, isNewMember };
 }
 
@@ -90,7 +95,6 @@ export function invitesApiRouter(cfg: AppConfig): Router {
     }
 
     const token = generateToken();
-    const email: string | null = typeof req.body?.email === "string" ? req.body.email : null;
     const maxUses: number | null = Number.isInteger(req.body?.maxUses) ? req.body.maxUses : null;
     const expiresInDays: number | null = Number.isInteger(req.body?.expiresInDays) ? req.body.expiresInDays : null;
     const expiresAt = expiresInDays ? new Date(Date.now() + expiresInDays * 86400 * 1000) : null;
@@ -100,18 +104,17 @@ export function invitesApiRouter(cfg: AppConfig): Router {
       campaign_id: campaignId,
       created_by_discord_id: req.user!.discordId,
       role: requestedRole,
-      email,
       max_uses: maxUses,
       expires_at: expiresAt,
     });
 
     const url = inviteUrl(cfg, token);
-    let emailResult: { sent: boolean; reason?: string } | undefined;
-    if (email) {
-      emailResult = await sendInviteEmail(cfg, email, campaign.name, url);
-    }
-
-    res.status(201).json({ token, url, role: requestedRole, expiresAt, maxUses, email: emailResult });
+    await logAudit("invite.created", {
+      campaignId,
+      actorDiscordId: req.user!.discordId,
+      detail: { token, role: requestedRole, maxUses, expiresAt },
+    });
+    res.status(201).json({ token, url, role: requestedRole, expiresAt, maxUses });
   });
 
   router.get("/campaigns/:campaignId/invites", requireCampaignRole(["DM"]), async (req, res) => {
@@ -123,7 +126,6 @@ export function invitesApiRouter(cfg: AppConfig): Router {
         token: i.token,
         url: inviteUrl(cfg, i.token),
         role: i.role,
-        email: i.email,
         uses: i.uses,
         maxUses: i.max_uses,
         expiresAt: i.expires_at,
@@ -142,6 +144,7 @@ export function invitesApiRouter(cfg: AppConfig): Router {
       res.status(404).json({ error: "invite_not_found_or_already_revoked" });
       return;
     }
+    await logAudit("invite.revoked", { campaignId: req.params.campaignId, actorDiscordId: req.user!.discordId, detail: { token: req.params.token } });
     res.status(204).end();
   });
 

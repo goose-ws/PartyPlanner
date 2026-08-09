@@ -9,13 +9,15 @@ export interface CampaignCadence {
   interval_weeks: number;
   sessions_per_interval: number;
   blackout_days_after_lock: number;
+  min_players_required: number;
 }
 
 export interface CandidateDate {
   date: DateStr;
   score: number;
   isDmAvailable: boolean;
-  breakdown: Array<{ discordId: string; weight: number; joiningLate: boolean; droppingEarly: boolean }>;
+  isAboveMinPlayers: boolean;
+  breakdown: Array<{ discordId: string; weight: number; joiningLate: boolean; droppingEarly: boolean; excluded: boolean }>;
 }
 
 export interface BlockedDate {
@@ -48,11 +50,22 @@ export async function getCandidateDates(
   const campaign = await db()("campaigns").where({ id: campaignId }).first();
   if (!campaign) throw new Error("campaign_not_found");
 
-  const members: Array<{ discord_id: string; role: "DM" | "Player" }> = await db()("campaign_members").where({
+  const members: Array<{ discord_id: string; role: "DM" | "Player"; excluded_from_scoring: boolean }> = await db()(
+    "campaign_members"
+  ).where({
     campaign_id: campaignId,
   });
   const dmIds = members.filter((m) => m.role === "DM").map((m) => m.discord_id);
   const memberIds = members.map((m) => m.discord_id);
+  const excludedIds = new Set(members.filter((m) => m.excluded_from_scoring).map((m) => m.discord_id));
+  // "Ignore their values entirely" — excluded members don't count toward the
+  // score sum, don't factor into the DM veto, and don't count toward the
+  // min-players headcount, even if they happen to be the DM.
+  const scoringMemberIds = memberIds.filter((id) => !excludedIds.has(id));
+  const activeDmIds = dmIds.filter((id) => !excludedIds.has(id));
+  const activePlayerIds = members
+    .filter((m) => m.role === "Player" && !excludedIds.has(m.discord_id))
+    .map((m) => m.discord_id);
 
   const defaultsRows: Array<{ discord_id: string; day_of_week: number; weight: number }> = await db()(
     "default_availability"
@@ -145,14 +158,22 @@ export async function getCandidateDates(
       continue;
     }
 
-    const breakdown = memberIds.map((id) => ({ discordId: id, weight: weightFor(id, date), ...flagsFor(id, date) }));
+    const breakdown = memberIds.map((id) => ({
+      discordId: id,
+      weight: weightFor(id, date),
+      ...flagsFor(id, date),
+      excluded: excludedIds.has(id),
+    }));
     // DM veto is based on raw weight, not the flag-adjusted contribution — a
     // DM joining late is still available for (most of) the session, so they
     // shouldn't zero out the whole date the way an outright "No" does.
-    const isDmAvailable = dmIds.length === 0 || dmIds.every((id) => weightFor(id, date) > 0);
-    const score = isDmAvailable ? memberIds.reduce((sum, id) => sum + contributionFor(id, date), 0) : 0;
+    const isDmAvailable = activeDmIds.length === 0 || activeDmIds.every((id) => weightFor(id, date) > 0);
+    const availablePlayerCount = activePlayerIds.filter((id) => weightFor(id, date) > 0).length;
+    const isAboveMinPlayers = availablePlayerCount >= campaign.min_players_required;
+    const score =
+      isDmAvailable && isAboveMinPlayers ? scoringMemberIds.reduce((sum, id) => sum + contributionFor(id, date), 0) : 0;
 
-    candidates.push({ date, score, isDmAvailable, breakdown });
+    candidates.push({ date, score, isDmAvailable, isAboveMinPlayers, breakdown });
   }
 
   candidates.sort((a, b) => (b.score !== a.score ? b.score - a.score : a.date.localeCompare(b.date)));

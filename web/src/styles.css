@@ -4,11 +4,17 @@
   --pp-surface: #ffffff;
   --pp-ink: #1b2340;
   --pp-ink-soft: #4a5178;
+  --pp-ink-faint: #6b6f85;
   --pp-line: #dad6cc;
   --pp-brass: #c08a2e;
   --pp-brass-dark: #9a6c1f;
   --pp-crimson: #a23b3b;
   --pp-focus: #2f6fed;
+  --pp-shadow: 0 1px 2px rgba(27, 35, 64, 0.06), 0 4px 16px rgba(27, 35, 64, 0.06);
+  --pp-scrim: rgba(27, 35, 64, 0.35);
+  --pp-btn-primary-bg: #1b2340;
+  --pp-btn-primary-bg-hover: #29315a;
+  --pp-btn-primary-fg: #ffffff;
 
   /* Type */
   --pp-font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
@@ -18,7 +24,54 @@
   /* Scale */
   --pp-radius: 10px;
   --pp-radius-sm: 6px;
-  --pp-shadow: 0 1px 2px rgba(27, 35, 64, 0.06), 0 4px 16px rgba(27, 35, 64, 0.06);
+}
+
+/*
+ * Dark theme. Two ways in:
+ *  - [data-theme="dark"] — explicit user choice (ThemeToggle), persisted to
+ *    localStorage and applied to <html> before first paint (see index.html)
+ *    to avoid a light-mode flash.
+ *  - prefers-color-scheme, when the user hasn't made an explicit choice at
+ *    all (no [data-theme] attribute present yet).
+ * [data-theme="light"] always wins over system preference, so picking
+ * "light" on a dark-mode OS sticks.
+ */
+[data-theme="dark"] {
+  --pp-bg: #15161d;
+  --pp-surface: #1e202a;
+  --pp-ink: #ebe9e2;
+  --pp-ink-soft: #a9adc7;
+  --pp-ink-faint: #7c8098;
+  --pp-line: #34374a;
+  --pp-brass: #d9a548;
+  --pp-brass-dark: #f0bf63;
+  --pp-crimson: #e08585;
+  --pp-focus: #6ea1ff;
+  --pp-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 20px rgba(0, 0, 0, 0.35);
+  --pp-scrim: rgba(0, 0, 0, 0.55);
+  --pp-btn-primary-bg: #d9a548;
+  --pp-btn-primary-bg-hover: #f0bf63;
+  --pp-btn-primary-fg: #15161d;
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) {
+    --pp-bg: #15161d;
+    --pp-surface: #1e202a;
+    --pp-ink: #ebe9e2;
+    --pp-ink-soft: #a9adc7;
+    --pp-ink-faint: #7c8098;
+    --pp-line: #34374a;
+    --pp-brass: #d9a548;
+    --pp-brass-dark: #f0bf63;
+    --pp-crimson: #e08585;
+    --pp-focus: #6ea1ff;
+    --pp-shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 20px rgba(0, 0, 0, 0.35);
+    --pp-scrim: rgba(0, 0, 0, 0.55);
+    --pp-btn-primary-bg: #d9a548;
+    --pp-btn-primary-bg-hover: #f0bf63;
+    --pp-btn-primary-fg: #15161d;
+  }
 }
 
 * {
@@ -39,6 +92,7 @@ body {
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 150ms ease, color 150ms ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -86,16 +140,17 @@ code,
 
 html, body, #root {
   overflow-x: hidden;
-  max-width: 100vw;
+  max-width: 100%;
 }
 
 /* --- Layout shell --- */
 
 .pp-shell {
   min-height: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  max-width: 100vw;
+  max-width: 100%;
   overflow-x: hidden;
 }
 
@@ -108,6 +163,7 @@ html, body, #root {
   padding: 14px 16px;
   border-bottom: 1px solid var(--pp-line);
   background: var(--pp-surface);
+  min-width: 0;
 }
 
 .pp-wordmark {
@@ -140,6 +196,7 @@ html, body, #root {
 .pp-main {
   flex: 1;
   width: 100%;
+  min-width: 0;
   max-width: 880px;
   margin: 0 auto;
   padding: 48px 24px 80px;
@@ -172,12 +229,12 @@ html, body, #root {
 }
 
 .pp-btn-primary {
-  background: var(--pp-ink);
-  color: white;
+  background: var(--pp-btn-primary-bg);
+  color: var(--pp-btn-primary-fg);
 }
 
 .pp-btn-primary:hover {
-  background: #29315a;
+  background: var(--pp-btn-primary-bg-hover);
 }
 
 .pp-btn-brass {

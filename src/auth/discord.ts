@@ -13,6 +13,8 @@ export interface DiscordTokenResponse {
 export interface DiscordUser {
   id: string;
   username: string;
+  /** Discord's "display name" shown in messages/mentions — null for accounts that never set one, in which case Discord itself falls back to showing `username`. */
+  global_name: string | null;
   avatar: string | null;
 }
 

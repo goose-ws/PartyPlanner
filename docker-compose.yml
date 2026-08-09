@@ -43,13 +43,6 @@ services:
       - SESSION_SIGNING_SECRET=${SESSION_SIGNING_SECRET}   # openssl rand -hex 32
       - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}         # openssl rand -hex 32
 
-      # --- Optional: invite emails via SMTP. Omit all four to disable. ---
-      # - SMTP_HOST=smtp.example.com
-      # - SMTP_PORT=587
-      # - SMTP_USER=apikey
-      # - SMTP_PASSWORD=${SMTP_PASSWORD}
-      # - SMTP_FROM=Party Planner <no-reply@example.com>
-
 volumes:
   partyplanner_config:
   partyplanner_data:

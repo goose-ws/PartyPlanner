@@ -74,15 +74,6 @@ export function loadConfig(): AppConfig {
     scheduling: {
       defaultWindowMonths: Number(process.env.DEFAULT_WINDOW_MONTHS ?? stored.scheduling?.defaultWindowMonths ?? 6),
     },
-
-    smtp: {
-      host: process.env.SMTP_HOST ?? stored.smtp?.host ?? null,
-      port: Number(process.env.SMTP_PORT ?? stored.smtp?.port ?? 587),
-      user: process.env.SMTP_USER ?? stored.smtp?.user ?? null,
-      password: process.env.SMTP_PASSWORD ?? stored.smtp?.password ?? null,
-      fromAddress: process.env.SMTP_FROM ?? stored.smtp?.fromAddress ?? "Party Planner <no-reply@localhost>",
-      secure: parseBool(process.env.SMTP_SECURE, stored.smtp?.secure ?? false),
-    },
   };
 
   // Persist anything newly resolved (from env, or freshly generated) back to

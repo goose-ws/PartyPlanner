@@ -2,6 +2,8 @@ import { Router } from "express";
 import { db } from "../db/index.js";
 import { requireCampaignRole } from "../middleware/authz.js";
 import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
+import { invalidateFutureConfirmations } from "../scheduling/blockConfirmations.js";
+import { logAudit } from "../audit.js";
 
 const VALID_WEIGHTS = new Set([0, 1, 2, 3]);
 
@@ -74,6 +76,12 @@ export function availabilityRouter(): Router {
           .merge({ weight: d.weight });
       }
     });
+    await invalidateFutureConfirmations(campaignId, target.targetId);
+    await logAudit("availability.default_changed", {
+      campaignId,
+      actorDiscordId: req.user!.discordId,
+      detail: { targetDiscordId: target.targetId, days },
+    });
 
     res.status(204).end();
   });
@@ -101,6 +109,12 @@ export function availabilityRouter(): Router {
     if (weight === null) {
       // Explicit null clears the override (and any flags on it), reverting to the weekly default for that date.
       await db()("specific_availability").where({ campaign_id: campaignId, discord_id: target.targetId, date_utc: date }).delete();
+      await invalidateFutureConfirmations(campaignId, target.targetId);
+      await logAudit("availability.specific_changed", {
+        campaignId,
+        actorDiscordId: req.user!.discordId,
+        detail: { targetDiscordId: target.targetId, date, cleared: true },
+      });
       res.status(204).end();
       return;
     }
@@ -124,6 +138,12 @@ export function availabilityRouter(): Router {
       })
       .onConflict(["campaign_id", "discord_id", "date_utc"])
       .merge({ weight, joining_late: joiningLate, dropping_early: droppingEarly });
+    await invalidateFutureConfirmations(campaignId, target.targetId);
+    await logAudit("availability.specific_changed", {
+      campaignId,
+      actorDiscordId: req.user!.discordId,
+      detail: { targetDiscordId: target.targetId, date, weight, joiningLate, droppingEarly },
+    });
 
     res.status(204).end();
   });
@@ -137,13 +157,23 @@ export function availabilityRouter(): Router {
       db()("campaign_members")
         .join("users", "users.discord_id", "campaign_members.discord_id")
         .where("campaign_members.campaign_id", campaignId)
-        .select("users.discord_id", "users.username", "campaign_members.role"),
+        .select(
+          "users.discord_id",
+          db().raw("COALESCE(users.global_name, users.username) as username"),
+          "campaign_members.role",
+          "campaign_members.excluded_from_scoring"
+        ),
       db()("default_availability").where({ campaign_id: campaignId }),
       db()("specific_availability").where({ campaign_id: campaignId }),
     ]);
 
     res.json({
-      members: members.map((m) => ({ discordId: m.discord_id, username: m.username, role: m.role })),
+      members: members.map((m) => ({
+        discordId: m.discord_id,
+        username: m.username,
+        role: m.role,
+        excludedFromScoring: !!m.excluded_from_scoring,
+      })),
       defaults: defaults.map((d) => ({ discordId: d.discord_id, dayOfWeek: d.day_of_week, weight: d.weight })),
       specific: specific.map((s) => ({
         discordId: s.discord_id,

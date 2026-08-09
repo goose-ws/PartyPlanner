@@ -14,9 +14,11 @@ export interface Campaign {
   interval_weeks: number;
   sessions_per_interval: number;
   blackout_days_after_lock: number;
+  min_players_required: number; // 0 = no minimum enforced
   session_time_start: string;
   session_time_end: string;
   timezone: string;
+  last_session_number: number; // used to compute the number the NEXT locked session would get (last_session_number + 1)
   discord_webhook_url?: string | null; // present only for root — redacted otherwise
   reminder_advance_days: number;
   reminder_final_days: number;
@@ -24,6 +26,9 @@ export interface Campaign {
   reminder_advance_enabled: boolean;
   reminder_final_enabled: boolean;
   reminder_dayof_enabled: boolean;
+  reminder_lock_warning_days: number;
+  reminder_lock_warning_enabled: boolean;
+  confirm_ahead_sessions: number; // how many upcoming open blocks players can confirm ahead of time (1 = just the next one)
   myRole?: "DM" | "Player";
 }
 
@@ -31,7 +36,6 @@ export interface Invite {
   token: string;
   url: string;
   role: "DM" | "Player";
-  email: string | null;
   uses: number;
   maxUses: number | null;
   expiresAt: string | null;
@@ -43,6 +47,7 @@ export interface Member {
   discordId: string;
   username: string;
   role: "DM" | "Player";
+  excludedFromScoring: boolean;
 }
 
 export interface AvailabilityAll {
@@ -55,7 +60,8 @@ export interface CandidateDate {
   date: string;
   score: number;
   isDmAvailable: boolean;
-  breakdown: Array<{ discordId: string; weight: number; joiningLate: boolean; droppingEarly: boolean }>;
+  isAboveMinPlayers: boolean;
+  breakdown: Array<{ discordId: string; weight: number; joiningLate: boolean; droppingEarly: boolean; excluded: boolean }>;
 }
 export interface BlockedDate {
   date: string;
@@ -121,6 +127,7 @@ export const api = {
       intervalWeeks: number;
       sessionsPerInterval: number;
       blackoutDaysAfterLock: number;
+      minPlayersRequired: number;
       discordWebhookUrl: string | null;
       reminderAdvanceDays: number;
       reminderFinalDays: number;
@@ -128,6 +135,9 @@ export const api = {
       reminderAdvanceEnabled: boolean;
       reminderFinalEnabled: boolean;
       reminderDayofEnabled: boolean;
+      reminderLockWarningDays: number;
+      reminderLockWarningEnabled: boolean;
+      confirmAheadSessions: number;
     }>
   ) => request<Campaign>(`/api/campaigns/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   testReminder: (campaignId: string, stage: "advance" | "final" | "dayof") =>
@@ -139,7 +149,7 @@ export const api = {
     request<void>(`/api/campaigns/${id}/join`, { method: "POST", body: JSON.stringify({ role }) }),
 
   listMembers: (campaignId: string) =>
-    request<{ members: { discord_id: string; username: string; role: "DM" | "Player" }[] }>(
+    request<{ members: { discord_id: string; username: string; role: "DM" | "Player"; excluded_from_scoring: boolean }[] }>(
       `/api/campaigns/${campaignId}/members`
     ),
   setMemberRole: (campaignId: string, discordId: string, role: "DM" | "Player") =>
@@ -147,14 +157,17 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ role }),
     }),
+  setMemberExclusion: (campaignId: string, discordId: string, excludedFromScoring: boolean) =>
+    request<void>(`/api/campaigns/${campaignId}/members/${discordId}/exclusion`, {
+      method: "PATCH",
+      body: JSON.stringify({ excludedFromScoring }),
+    }),
   removeMember: (campaignId: string, discordId: string) =>
     request<void>(`/api/campaigns/${campaignId}/members/${discordId}`, { method: "DELETE" }),
 
   listInvites: (campaignId: string) => request<{ invites: Invite[] }>(`/api/campaigns/${campaignId}/invites`),
-  createInvite: (
-    campaignId: string,
-    input: { role?: "DM" | "Player"; email?: string; maxUses?: number; expiresInDays?: number }
-  ) => request<Invite>(`/api/campaigns/${campaignId}/invites`, { method: "POST", body: JSON.stringify(input) }),
+  createInvite: (campaignId: string, input: { role?: "DM" | "Player"; maxUses?: number; expiresInDays?: number }) =>
+    request<Invite>(`/api/campaigns/${campaignId}/invites`, { method: "POST", body: JSON.stringify(input) }),
   revokeInvite: (campaignId: string, token: string) =>
     request<void>(`/api/campaigns/${campaignId}/invites/${token}/revoke`, { method: "POST" }),
 
@@ -197,8 +210,41 @@ export const api = {
     request<void>(`/api/campaigns/${campaignId}/blocks/skip`, { method: "POST", body: JSON.stringify({ date, notes }) }),
   backfillSession: (
     campaignId: string,
-    input: { sessionNumber: number | null; date: string; status: "completed" | "cancelled" | "skipped"; notes?: string; absentDiscordIds: string[] }
-  ) => request<{ id: string }>(`/api/campaigns/${campaignId}/sessions/backfill`, { method: "POST", body: JSON.stringify(input) }),
+    input: { date: string; status: "completed" | "cancelled" | "skipped"; notes?: string; absentDiscordIds: string[] }
+  ) => request<{ id: string; sessionNumber: number | null }>(`/api/campaigns/${campaignId}/sessions/backfill`, { method: "POST", body: JSON.stringify(input) }),
+
+  getBlockStatus: (campaignId: string) =>
+    request<{
+      blocks: Array<{
+        block: { index: number; start: string; end: string };
+        confirmations: Record<string, boolean>;
+        youConfirmed: boolean;
+      }>;
+    }>(`/api/campaigns/${campaignId}/block-status`),
+  setBlockConfirmation: (campaignId: string, blockStart: string, confirmed: boolean) =>
+    request<void>(`/api/campaigns/${campaignId}/block-status/me`, { method: "PUT", body: JSON.stringify({ blockStart, confirmed }) }),
+  setMemberBlockConfirmation: (campaignId: string, discordId: string, blockStart: string, confirmed: boolean) =>
+    request<void>(`/api/campaigns/${campaignId}/block-status/${discordId}`, {
+      method: "PUT",
+      body: JSON.stringify({ blockStart, confirmed }),
+    }),
+
+  getAuditLog: (params: { campaignId?: string; event?: string; before?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.campaignId) qs.set("campaignId", params.campaignId);
+    if (params.event) qs.set("event", params.event);
+    if (params.before) qs.set("before", String(params.before));
+    return request<{
+      entries: Array<{
+        id: number;
+        campaignId: string | null;
+        actorDiscordId: string | null;
+        event: string;
+        detail: Record<string, unknown> | null;
+        createdAt: string;
+      }>;
+    }>(`/api/audit-log${qs.toString() ? `?${qs}` : ""}`);
+  },
 
   getStats: (campaignId: string) => request<Stats>(`/api/campaigns/${campaignId}/stats`),
 
@@ -231,7 +277,6 @@ export interface CoreSettings {
   session: { cookieName: string; maxAgeSeconds: number; signingSecretSet: boolean };
   security: { tokenEncryptionKeySet: boolean };
   scheduling: { defaultWindowMonths: number };
-  smtp: { host: string | null; port: number; user: string | null; passwordSet: boolean; fromAddress: string; secure: boolean };
 }
 
 export { ApiError };

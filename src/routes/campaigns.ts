@@ -5,6 +5,7 @@ import { requireRoot, requireAuth } from "../middleware/authz.js";
 import { requireCampaignRole } from "../middleware/authz.js";
 import { generateUniqueSlug } from "../scheduling/slug.js";
 import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
+import { logAudit } from "../audit.js";
 
 /** The webhook URL is a bearer credential — anyone holding it can post into that Discord channel — so it's never sent to non-root callers. */
 function redactWebhook<T extends Record<string, any>>(campaign: T, isRoot: boolean): T {
@@ -45,6 +46,8 @@ export function campaignsRouter(): Router {
       interval_weeks: req.body?.intervalWeeks ?? 2,
       sessions_per_interval: req.body?.sessionsPerInterval ?? 1,
       blackout_days_after_lock: req.body?.blackoutDaysAfterLock ?? 7,
+      min_players_required: req.body?.minPlayersRequired ?? 0,
+      confirm_ahead_sessions: req.body?.confirmAheadSessions ?? 1,
       granularity: req.body?.granularity ?? "hourly",
       session_time_start: `${sessionTimeStart}:00`,
       session_time_end: `${sessionTimeEnd}:00`,
@@ -52,6 +55,7 @@ export function campaignsRouter(): Router {
     });
 
     const campaign = await db()("campaigns").where({ id }).first();
+    await logAudit("campaign.created", { campaignId: id, actorDiscordId: req.user!.discordId, detail: { name, startDate } });
     res.status(201).json(campaign);
   });
 
@@ -128,6 +132,13 @@ export function campaignsRouter(): Router {
       }
       updates.blackout_days_after_lock = req.body.blackoutDaysAfterLock;
     }
+    if (req.body?.minPlayersRequired !== undefined) {
+      if (!Number.isInteger(req.body.minPlayersRequired) || req.body.minPlayersRequired < 0) {
+        res.status(400).json({ error: "invalid_minPlayersRequired" });
+        return;
+      }
+      updates.min_players_required = req.body.minPlayersRequired;
+    }
 
     if (req.body?.discordWebhookUrl !== undefined) {
       const url = req.body.discordWebhookUrl;
@@ -161,6 +172,22 @@ export function campaignsRouter(): Router {
     if (req.body?.reminderAdvanceEnabled !== undefined) updates.reminder_advance_enabled = !!req.body.reminderAdvanceEnabled;
     if (req.body?.reminderFinalEnabled !== undefined) updates.reminder_final_enabled = !!req.body.reminderFinalEnabled;
     if (req.body?.reminderDayofEnabled !== undefined) updates.reminder_dayof_enabled = !!req.body.reminderDayofEnabled;
+    if (req.body?.reminderLockWarningDays !== undefined) {
+      if (!Number.isInteger(req.body.reminderLockWarningDays) || req.body.reminderLockWarningDays < 0) {
+        res.status(400).json({ error: "invalid_reminderLockWarningDays" });
+        return;
+      }
+      updates.reminder_lock_warning_days = req.body.reminderLockWarningDays;
+    }
+    if (req.body?.reminderLockWarningEnabled !== undefined)
+      updates.reminder_lock_warning_enabled = !!req.body.reminderLockWarningEnabled;
+    if (req.body?.confirmAheadSessions !== undefined) {
+      if (!Number.isInteger(req.body.confirmAheadSessions) || req.body.confirmAheadSessions < 1) {
+        res.status(400).json({ error: "invalid_confirmAheadSessions" });
+        return;
+      }
+      updates.confirm_ahead_sessions = req.body.confirmAheadSessions;
+    }
 
     if (Object.keys(updates).length === 0) {
       res.status(400).json({ error: "no_updatable_fields_provided" });
@@ -169,6 +196,7 @@ export function campaignsRouter(): Router {
 
     await db()("campaigns").where({ id: req.params.campaignId }).update(updates);
     const updated = await db()("campaigns").where({ id: req.params.campaignId }).first();
+    await logAudit("campaign.settings_updated", { campaignId: req.params.campaignId, actorDiscordId: req.user!.discordId, detail: updates });
     res.json(updated);
   });
 
@@ -261,8 +289,39 @@ export function campaignsRouter(): Router {
       res.status(404).json({ error: "membership_not_found" });
       return;
     }
+    await logAudit("member.role_changed", {
+      campaignId: req.params.campaignId,
+      actorDiscordId: req.user!.discordId,
+      detail: { targetDiscordId: req.params.discordId, role, demotedDiscordId: result.demoted },
+    });
     res.json({ campaignId: req.params.campaignId, discordId: req.params.discordId, role, demotedDiscordId: result.demoted });
   });
+
+  // DM or root: toggle whether a member's availability is ignored by the
+  // scoring engine entirely (score sum, DM veto, and the min-players
+  // headcount). Unlike role changes, this is a DM-level action, not
+  // root-only — it's meant for a DM to manage a flaky player on their own
+  // table without needing root involved every time.
+  router.patch(
+    "/campaigns/:campaignId/members/:discordId/exclusion",
+    requireCampaignRole(["DM"]),
+    async (req, res) => {
+      const excluded = !!req.body?.excludedFromScoring;
+      const updated = await db()("campaign_members")
+        .where({ campaign_id: req.params.campaignId, discord_id: req.params.discordId })
+        .update({ excluded_from_scoring: excluded });
+      if (!updated) {
+        res.status(404).json({ error: "membership_not_found" });
+        return;
+      }
+      await logAudit("member.exclusion_toggled", {
+        campaignId: req.params.campaignId,
+        actorDiscordId: req.user!.discordId,
+        detail: { targetDiscordId: req.params.discordId, excludedFromScoring: excluded },
+      });
+      res.json({ campaignId: req.params.campaignId, discordId: req.params.discordId, excludedFromScoring: excluded });
+    }
+  );
 
   // Remove a member from the campaign. Root can remove anyone; a DM can
   // only remove Players (not another DM) — same trust boundary as invites,
@@ -284,6 +343,11 @@ export function campaignsRouter(): Router {
     await db()("campaign_members")
       .where({ campaign_id: req.params.campaignId, discord_id: req.params.discordId })
       .delete();
+    await logAudit("member.removed", {
+      campaignId: req.params.campaignId,
+      actorDiscordId: req.user!.discordId,
+      detail: { targetDiscordId: req.params.discordId, targetRole: target.role },
+    });
     res.status(204).end();
   });
 
@@ -305,11 +369,23 @@ export function campaignsRouter(): Router {
       }
     }
 
-    const members = await db()("campaign_members")
+    const rows = await db()("campaign_members")
       .join("users", "users.discord_id", "campaign_members.discord_id")
       .where("campaign_members.campaign_id", req.params.campaignId)
-      .select("users.discord_id", "users.username", "campaign_members.role");
-    res.json({ members });
+      .select(
+        "users.discord_id",
+        db().raw("COALESCE(users.global_name, users.username) as username"),
+        "campaign_members.role",
+        "campaign_members.excluded_from_scoring"
+      );
+    res.json({
+      members: rows.map((m) => ({
+        discord_id: m.discord_id,
+        username: m.username,
+        role: m.role,
+        excluded_from_scoring: !!m.excluded_from_scoring,
+      })),
+    });
   });
 
   // Root-only: formally join a campaign as a member. Root can already view

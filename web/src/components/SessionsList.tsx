@@ -99,7 +99,9 @@ export function SessionsList({
   onChanged: () => void;
   onViewOnCalendar: (date: string) => void;
 }) {
-  if (sessions.length === 0) {
+  const visible = sessions.filter((s) => s.status === "scheduled" || s.status === "completed");
+
+  if (visible.length === 0) {
     return (
       <div className="pp-empty">
         <p>No sessions locked yet — pick a date on the calendar above.</p>
@@ -109,11 +111,11 @@ export function SessionsList({
 
   return (
     <div style={{ display: "grid", gap: 8 }}>
-      {sessions.map((s) => (
+      {visible.map((s) => (
         <div
           key={s.id}
           className="pp-card"
-          style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+          style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}
         >
           <div>
             <span style={{ fontSize: 14 }}>

@@ -43,8 +43,18 @@ function Pips({ weight, size = 7 }: { weight: number; size?: number }) {
 /** Static, read-only weight indicator — used when viewing another member's response. */
 export function PipDisplay({ weight, size }: { weight: number; size?: number }) {
   return (
-    <span title={weightLabel(weight)} style={{ display: "inline-flex", alignItems: "center" }}>
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 12,
+        fontFamily: "var(--pp-font-mono)",
+        color: "var(--pp-ink-soft)",
+      }}
+    >
       <Pips weight={weight} size={size} />
+      {weightLabel(weight)}
     </span>
   );
 }

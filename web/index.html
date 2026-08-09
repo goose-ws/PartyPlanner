@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Party Planner</title>
     <meta name="description" content="Session scheduling for your table." />
+    <script>
+      // Runs before any CSS/paint so there's no light-mode flash for users
+      // who've picked dark. No value saved = follow system preference, via
+      // the prefers-color-scheme fallback in styles.css (see html:not([data-theme])).
+      (function () {
+        try {
+          var saved = localStorage.getItem("pp-theme");
+          if (saved === "light" || saved === "dark") {
+            document.documentElement.setAttribute("data-theme", saved);
+          }
+        } catch (e) {
+          // localStorage can throw in locked-down contexts (private browsing, etc.) — just fall back to system preference.
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

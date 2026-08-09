@@ -8,6 +8,22 @@ export function toDateStr(y: number, m: number, d: number): DateStr {
   return `${y}-${pad(m)}-${pad(d)}`;
 }
 
+function toEpochDay(date: DateStr): number {
+  const [y, m, d] = date.split("-").map(Number);
+  return Math.floor(Date.UTC(y!, m! - 1, d!) / 86_400_000);
+}
+
+/** Whole days from a to b (b - a). Mirrors the backend's diffDays() exactly. */
+export function diffDays(a: DateStr, b: DateStr): number {
+  return toEpochDay(b) - toEpochDay(a);
+}
+
+/** Inclusive block index containing `date`, relative to the campaign's anchor. Mirrors the backend's blockIndexOf() exactly. */
+export function blockIndexOf(startDate: DateStr, intervalWeeks: number, date: DateStr): number {
+  const blockLengthDays = intervalWeeks * 7;
+  return Math.floor(diffDays(startDate, date) / blockLengthDays);
+}
+
 export function todayUtc(): DateStr {
   return new Date().toISOString().slice(0, 10);
 }

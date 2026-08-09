@@ -1,9 +1,35 @@
 import { useState } from "react";
 import { api, type AvailabilityAll, type CandidateDate, type Session, type AuthedUser } from "../api";
-import { weightFor, flagsFor, buildAvailabilityMaps } from "../scheduling";
+import { weightFor, flagsFor, buildAvailabilityMaps, contributionFor } from "../scheduling";
 import { PipDisplay, WeightPicker } from "./PipMeter";
 import { RoleBadge } from "./RoleBadge";
 import { formatDateHuman, type DateStr } from "../dateMath";
+
+/** Small mono tag showing a member's calculated score contribution for this date — sits right next to their RoleBadge. */
+function ScoreTag({ score, excluded }: { score: number; excluded?: boolean }) {
+  const display = Number.isInteger(score) ? String(score) : score.toFixed(1);
+  return (
+    <span
+      className="pp-mono"
+      style={{
+        fontSize: 10.5,
+        letterSpacing: "0.04em",
+        color: excluded ? "var(--pp-ink-faint)" : "var(--pp-ink-soft)",
+        border: "1px solid var(--pp-line)",
+        borderRadius: 4,
+        padding: "2px 6px",
+        fontStyle: excluded ? "italic" : "normal",
+      }}
+      title={
+        excluded
+          ? `Excluded from scoring — this response (${display} pt${score === 1 ? "" : "s"}) isn't counted toward the total`
+          : `Score contribution: ${display}`
+      }
+    >
+      {excluded ? "excluded" : `${display} pt${score === 1 ? "" : "s"}`}
+    </span>
+  );
+}
 
 function FlagChip({ label, active, onToggle, disabled }: { label: string; active: boolean; onToggle: () => void; disabled?: boolean }) {
   return (
@@ -56,6 +82,19 @@ export function DayDetailModal({
   const isDm = campaignMyRole === "DM";
   const canManage = isRoot || isDm;
   const maps = buildAvailabilityMaps(availability);
+
+  async function toggleExclusion(discordId: string, currentlyExcluded: boolean) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.setMemberExclusion(campaignId, discordId, !currentlyExcluded);
+      onChanged();
+    } catch {
+      setError("Couldn't update that member's scoring exclusion.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function saveResponse(discordId: string, weight: number, joiningLate: boolean, droppingEarly: boolean) {
     setBusy(true);
@@ -161,7 +200,7 @@ export function DayDetailModal({
       style={{
         position: "fixed",
         inset: 0,
-        background: "rgba(27,35,64,0.35)",
+        background: "var(--pp-scrim)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -186,7 +225,9 @@ export function DayDetailModal({
             )}
             {!session && candidate && (
               <p style={{ fontSize: 12.5, marginTop: 4 }}>
-                Score {candidate.score} {!candidate.isDmAvailable && "· DM unavailable"}
+                Score {candidate.score}
+                {!candidate.isDmAvailable && " · DM unavailable"}
+                {candidate.isDmAvailable && !candidate.isAboveMinPlayers && " · below minimum players"}
               </p>
             )}
           </div>
@@ -201,11 +242,12 @@ export function DayDetailModal({
             const flags = flagsFor(maps, m.discordId, date);
             const editable = m.discordId === user.discordId || canManage;
             return (
-              <div key={m.discordId} style={{ display: "grid", gap: 4 }}>
+              <div key={m.discordId} style={{ display: "grid", gap: 4, opacity: m.excludedFromScoring ? 0.6 : 1 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                     <span style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.username}</span>
                     <RoleBadge role={m.role} />
+                    <ScoreTag score={contributionFor(maps, m.discordId, date)} excluded={m.excludedFromScoring} />
                   </div>
                   {editable ? (
                     <WeightPicker weight={w} onChange={(next) => saveResponse(m.discordId, next, flags.joiningLate, flags.droppingEarly)} disabled={busy} />
@@ -213,6 +255,27 @@ export function DayDetailModal({
                     <PipDisplay weight={w} />
                   )}
                 </div>
+                {canManage && (
+                  <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => toggleExclusion(m.discordId, m.excludedFromScoring)}
+                      title="DM/root-only: excludes this member's responses from all scoring calculations campaign-wide"
+                      style={{
+                        fontSize: 10,
+                        color: "var(--pp-ink-soft)",
+                        background: "none",
+                        border: "none",
+                        textDecoration: "underline",
+                        cursor: busy ? "default" : "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      {m.excludedFromScoring ? "Include in scoring" : "Exclude from scoring"}
+                    </button>
+                  </div>
+                )}
                 {editable && (
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                     <FlagChip

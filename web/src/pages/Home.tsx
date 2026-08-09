@@ -29,7 +29,7 @@ function NewCampaignForm({ onCreated }: { onCreated: () => void }) {
   return (
     <form onSubmit={submit} className="pp-card" style={{ padding: 20, display: "grid", gap: 14 }}>
       <h3 style={{ fontSize: 15 }}>New campaign</h3>
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: 12, alignItems: "end" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(0, 1fr) auto", gap: 12, alignItems: "end" }}>
         <div className="pp-field">
           <label htmlFor="campaign-name">Name</label>
           <input

@@ -16,8 +16,10 @@ import {
 import type { AppConfig } from "../types/config.js";
 import { buildSessionIcs } from "../scheduling/ics.js";
 import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
-import { composeStageReminder, composeDayOfReminder } from "../scheduling/reminders.js";
+import { composeStageReminder, composeDayOfReminder, getOpenBlocks } from "../scheduling/reminders.js";
+import { getBlockConfirmationStatus, confirmBlock, unconfirmBlock } from "../scheduling/blockConfirmations.js";
 import { sendDiscordMessage } from "../discord/webhook.js";
+import { logAudit } from "../audit.js";
 
 export function schedulingRouter(cfg: AppConfig): Router {
   const router = Router();
@@ -69,30 +71,15 @@ export function schedulingRouter(cfg: AppConfig): Router {
       res.status(400).json({ error: "invalid_date" });
       return;
     }
-    let sessionNumber: number | null = null;
-    if (req.body?.sessionNumber !== undefined && req.body?.sessionNumber !== null) {
-      if (!Number.isInteger(req.body.sessionNumber) || req.body.sessionNumber < 1) {
-        res.status(400).json({ error: "invalid_sessionNumber" });
-        return;
-      }
-      sessionNumber = req.body.sessionNumber;
-    } else if (status === "completed") {
-      res.status(400).json({ error: "sessionNumber_required_for_completed" });
-      return;
-    }
     const notes = typeof req.body?.notes === "string" ? req.body.notes.slice(0, 255) : null;
     const absentDiscordIds = Array.isArray(req.body?.absentDiscordIds)
       ? req.body.absentDiscordIds.filter((x: unknown) => typeof x === "string")
       : [];
 
     try {
-      const result = await backfillSession(req.params.campaignId!, { sessionNumber, date, status, notes, absentDiscordIds });
+      const result = await backfillSession(req.params.campaignId!, { date, status, notes, absentDiscordIds }, req.user!.discordId);
       res.status(201).json(result);
     } catch (err: any) {
-      if (err?.code === "ER_DUP_ENTRY") {
-        res.status(409).json({ error: "session_number_already_used" });
-        return;
-      }
       console.error("[scheduling] backfill failed:", err);
       res.status(500).json({ error: "backfill_failed" });
     }
@@ -105,7 +92,7 @@ export function schedulingRouter(cfg: AppConfig): Router {
       return;
     }
     try {
-      const session = await lockSessionDate(req.params.campaignId!, date, cfg.publicUrl!);
+      const session = await lockSessionDate(req.params.campaignId!, date, cfg.publicUrl!, req.user!.discordId);
       res.status(201).json(session);
     } catch (err) {
       console.error("[scheduling] lock failed:", err);
@@ -115,7 +102,7 @@ export function schedulingRouter(cfg: AppConfig): Router {
 
   router.post("/campaigns/:campaignId/sessions/:sessionId/cancel", requireCampaignRole(["DM"]), async (req, res) => {
     try {
-      await cancelSession(req.params.campaignId!, req.params.sessionId!);
+      await cancelSession(req.params.campaignId!, req.params.sessionId!, req.user!.discordId);
       res.status(204).end();
     } catch (err: any) {
       const msg = err?.message ?? "cancel_failed";
@@ -126,7 +113,7 @@ export function schedulingRouter(cfg: AppConfig): Router {
   router.post("/campaigns/:campaignId/sessions/:sessionId/cancel-block", requireCampaignRole(["DM"]), async (req, res) => {
     const notes = typeof req.body?.notes === "string" ? req.body.notes.slice(0, 255) : null;
     try {
-      await cancelBlock(req.params.campaignId!, req.params.sessionId!, notes);
+      await cancelBlock(req.params.campaignId!, req.params.sessionId!, notes, req.user!.discordId);
       res.status(204).end();
     } catch (err: any) {
       const msg = err?.message ?? "cancel_block_failed";
@@ -141,7 +128,7 @@ export function schedulingRouter(cfg: AppConfig): Router {
       return;
     }
     try {
-      await rescheduleSession(req.params.campaignId!, req.params.sessionId!, date, cfg.publicUrl!);
+      await rescheduleSession(req.params.campaignId!, req.params.sessionId!, date, cfg.publicUrl!, req.user!.discordId);
       res.status(204).end();
     } catch (err: any) {
       const msg = err?.message ?? "reschedule_failed";
@@ -158,7 +145,7 @@ export function schedulingRouter(cfg: AppConfig): Router {
     }
     const notes = typeof req.body?.notes === "string" ? req.body.notes.slice(0, 255) : null;
     try {
-      const block = await skipBlock(req.params.campaignId!, date, notes);
+      const block = await skipBlock(req.params.campaignId!, date, notes, req.user!.discordId);
       res.status(201).json(block);
     } catch (err) {
       console.error("[scheduling] skip failed:", err);
@@ -190,6 +177,89 @@ export function schedulingRouter(cfg: AppConfig): Router {
     }
   );
 
+  /**
+   * The open blocks players can currently confirm — up to
+   * campaign.confirm_ahead_sessions of them, not just the immediate next
+   * one — plus per-member confirmation status for each. Powers the
+   * Schedule tab's check-in card(s) and the DM's "3/5 confirmed" indicator.
+   */
+  router.get("/campaigns/:campaignId/block-status", requireCampaignRole(["DM", "Player"]), async (req, res) => {
+    const campaign = await db()("campaigns").where({ id: req.params.campaignId }).first();
+    const blocks = await getOpenBlocks(req.params.campaignId!, campaign?.confirm_ahead_sessions ?? 1);
+    const results = await Promise.all(
+      blocks.map(async (block) => {
+        const confirmations = await getBlockConfirmationStatus(req.params.campaignId!, block);
+        return { block, confirmations, youConfirmed: !!confirmations[req.user!.discordId] };
+      })
+    );
+    res.json({ blocks: results });
+  });
+
+  /** Self-service confirm/unconfirm — anyone in the campaign confirms for themselves, no DM gate needed. `blockStart` must be one of the currently-open confirmable blocks. */
+  router.put("/campaigns/:campaignId/block-status/me", requireCampaignRole(["DM", "Player"]), async (req, res) => {
+    const campaign = await db()("campaigns").where({ id: req.params.campaignId }).first();
+    const blocks = await getOpenBlocks(req.params.campaignId!, campaign?.confirm_ahead_sessions ?? 1);
+    const block = blocks.find((b) => b.start === req.body?.blockStart);
+    if (!block) {
+      res.status(409).json({ error: "block_not_open_for_confirmation" });
+      return;
+    }
+    if (req.body?.confirmed === false) {
+      await unconfirmBlock(req.params.campaignId!, req.user!.discordId, block.start);
+      await logAudit("block.unconfirmed", { campaignId: req.params.campaignId, actorDiscordId: req.user!.discordId, detail: { blockStart: block.start } });
+    } else {
+      await confirmBlock(req.params.campaignId!, req.user!.discordId, block.start);
+      await logAudit("block.confirmed", { campaignId: req.params.campaignId, actorDiscordId: req.user!.discordId, detail: { blockStart: block.start } });
+    }
+    res.status(204).end();
+  });
+
+  /**
+   * DM/root override — confirms or unconfirms someone ELSE's block, e.g.
+   * for a player who confirmed out-of-band (in person, over voice) but
+   * hasn't touched the app, or to force a re-confirm from someone the DM
+   * doesn't trust to have actually checked. Bypasses the normal
+   * self-service-only rule; unlike the auto-invalidation on availability
+   * edits, this is a deliberate manual action and is never triggered
+   * silently.
+   */
+  router.put(
+    "/campaigns/:campaignId/block-status/:discordId",
+    requireCampaignRole(["DM"]),
+    async (req, res) => {
+      const membership = await db()("campaign_members")
+        .where({ campaign_id: req.params.campaignId, discord_id: req.params.discordId })
+        .first();
+      if (!membership) {
+        res.status(404).json({ error: "membership_not_found" });
+        return;
+      }
+      const campaign = await db()("campaigns").where({ id: req.params.campaignId }).first();
+      const blocks = await getOpenBlocks(req.params.campaignId!, campaign?.confirm_ahead_sessions ?? 1);
+      const block = blocks.find((b) => b.start === req.body?.blockStart);
+      if (!block) {
+        res.status(409).json({ error: "block_not_open_for_confirmation" });
+        return;
+      }
+      if (req.body?.confirmed === false) {
+        await unconfirmBlock(req.params.campaignId!, req.params.discordId!, block.start);
+        await logAudit("block.unconfirmed_by_manager", {
+          campaignId: req.params.campaignId,
+          actorDiscordId: req.user!.discordId,
+          detail: { targetDiscordId: req.params.discordId, blockStart: block.start },
+        });
+      } else {
+        await confirmBlock(req.params.campaignId!, req.params.discordId!, block.start);
+        await logAudit("block.confirmed_by_manager", {
+          campaignId: req.params.campaignId,
+          actorDiscordId: req.user!.discordId,
+          detail: { targetDiscordId: req.params.discordId, blockStart: block.start },
+        });
+      }
+      res.status(204).end();
+    }
+  );
+
   router.post("/campaigns/:campaignId/reminders/test", requireCampaignRole(["DM"]), async (req, res) => {
     const campaignId = req.params.campaignId!;
     const stage = req.body?.stage;
@@ -208,22 +278,50 @@ export function schedulingRouter(cfg: AppConfig): Router {
       return;
     }
 
-    const composed =
-      stage === "dayof" ? await composeDayOfReminder(campaignId) : await composeStageReminder(campaignId, stage === "final" ? 2 : 1);
+    if (stage === "dayof") {
+      const composed = await composeDayOfReminder(campaignId);
+      if (!composed.ok) {
+        res.status(422).json({ error: composed.reason });
+        return;
+      }
+      if (!composed.content) {
+        // Valid state, but nothing to say (e.g. everyone's already responded) — still useful info, not an error.
+        res.json({ sent: false, content: null, reason: "nothing_to_report" });
+        return;
+      }
+      // Day-of reminders are meant to only highlight (not ping) via an embed —
+      // sending the test as plain `content` instead would turn every @mention
+      // in the roster into a real notification, which isn't what "test" should do.
+      const result = await sendDiscordMessage(campaign.discord_webhook_url, {
+        embeds: [{ title: "🧪 TEST — not a real reminder", description: composed.content, color: 0xc08a2e }],
+      });
+      await logAudit("webhook.test_sent", { campaignId, actorDiscordId: req.user!.discordId, detail: { stage } });
+      res.json({ sent: result.ok, content: composed.content });
+      return;
+    }
 
+    const composed = await composeStageReminder(cfg, campaignId, stage === "final" ? 2 : 1);
     if (!composed.ok) {
       res.status(422).json({ error: composed.reason });
       return;
     }
-    if (!composed.content) {
-      // Valid state, but nothing to say (e.g. everyone's already responded) — still useful info, not an error.
+    // One real message per unconfirmed member. Sending every one of those
+    // as a "test" would spam the channel and ping everyone for real, so
+    // only post one representative sample — but show all of them in the
+    // preview text so the DM can review exactly what each person would
+    // receive before it goes out for real.
+    if (composed.messages.length === 0) {
       res.json({ sent: false, content: null, reason: "nothing_to_report" });
       return;
     }
-
-    const testContent = `🧪 **TEST** (not a real reminder) — this is what the message would look like:\n${composed.content}`;
-    const result = await sendDiscordMessage(campaign.discord_webhook_url, testContent);
-    res.json({ sent: result.ok, content: composed.content });
+    const preview = composed.messages.map((m) => `— for ${m.username} —\n${m.content}`).join("\n\n");
+    const sample = composed.messages[0]!;
+    const result = await sendDiscordMessage(campaign.discord_webhook_url, {
+      content:
+        `🧪 **TEST** (not a real reminder) — sample for ${sample.username}, ${composed.messages.length} total would go out individually:\n${sample.content}`,
+    });
+    await logAudit("webhook.test_sent", { campaignId, actorDiscordId: req.user!.discordId, detail: { stage } });
+    res.json({ sent: result.ok, content: preview });
   });
 
   router.get("/campaigns/:campaignId/stats", requireCampaignRole(["DM", "Player"]), async (req, res) => {
@@ -238,10 +336,10 @@ export function schedulingRouter(cfg: AppConfig): Router {
         this.on("sa.session_id", "=", "s.id").andOn("sa.discord_id", "=", "cm.discord_id");
       })
       .where("cm.campaign_id", campaignId)
-      .groupBy("cm.discord_id", "u.username")
+      .groupBy("cm.discord_id", "u.username", "u.global_name")
       .select(
         "cm.discord_id",
-        "u.username",
+        db().raw("COALESCE(u.global_name, u.username) as username"),
         db().raw("COUNT(DISTINCT s.id) AS total_sessions"),
         db().raw("COUNT(DISTINCT sa.session_id) AS total_absences")
       );

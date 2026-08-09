@@ -11,6 +11,7 @@ import { encryptToken } from "../auth/tokenCrypto.js";
 import { createSession, destroySession } from "../auth/sessionStore.js";
 import { setSessionCookie, clearSessionCookie } from "../middleware/session.js";
 import { redeemInvite } from "./invites.js";
+import { logAudit } from "../audit.js";
 
 const OAUTH_STATE_COOKIE = "pp_oauth_state";
 const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes — just long enough to complete the Discord redirect dance
@@ -18,6 +19,12 @@ const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes — just long enoug
 interface OAuthStatePayload {
   state: string;
   invite: string | null;
+  returnTo: string | null;
+}
+
+/** Whitelist, not a denylist — the only legitimate returnTo destination today is a confirm link, and keeping this narrow rules out any open-redirect risk entirely rather than trying to sanitize an arbitrary path. */
+function isAllowedReturnTo(value: unknown): value is string {
+  return typeof value === "string" && /^\/confirm\/[A-Za-z0-9_.-]+$/.test(value);
 }
 
 /**
@@ -33,8 +40,9 @@ export function authPageRouter(cfg: AppConfig): Router {
   router.get("/login", (req, res) => {
     const state = crypto.randomBytes(16).toString("hex");
     const invite = typeof req.query.invite === "string" ? req.query.invite : null;
+    const returnTo = isAllowedReturnTo(req.query.returnTo) ? req.query.returnTo : null;
 
-    const payload: OAuthStatePayload = { state, invite };
+    const payload: OAuthStatePayload = { state, invite, returnTo };
     res.cookie(OAUTH_STATE_COOKIE, JSON.stringify(payload), {
       signed: true,
       httpOnly: true,
@@ -86,6 +94,7 @@ export function authPageRouter(cfg: AppConfig): Router {
           .where({ discord_id: discordUser.id })
           .update({
             username: discordUser.username,
+            global_name: discordUser.global_name ?? discordUser.username,
             avatar_hash: discordUser.avatar,
             discord_refresh_token: encryptedRefresh,
             ...(isConfiguredRoot && existing.global_role !== "root" ? { global_role: "root" } : {}),
@@ -94,10 +103,24 @@ export function authPageRouter(cfg: AppConfig): Router {
         await db()("users").insert({
           discord_id: discordUser.id,
           username: discordUser.username,
+          global_name: discordUser.global_name ?? discordUser.username,
           avatar_hash: discordUser.avatar,
           discord_refresh_token: encryptedRefresh,
           global_role: isConfiguredRoot ? "root" : "user",
         });
+      }
+
+      const sid = await createSession(discordUser.id, cfg.session.maxAgeSeconds);
+      setSessionCookie(res, cfg, sid);
+      await logAudit("auth.login", { actorDiscordId: discordUser.id, detail: { isNewUser: !existing } });
+
+      // A confirm-link returnTo takes priority — it's a specific, intentional
+      // destination the person was already headed to before login interrupted
+      // them, and lands back on /confirm/:token where the identity check
+      // against this freshly-created session actually happens.
+      if (statePayload.returnTo) {
+        res.redirect(statePayload.returnTo);
+        return;
       }
 
       // Redirects to a bare /campaigns/<id> path, which is a REACT ROUTER
@@ -113,9 +136,6 @@ export function authPageRouter(cfg: AppConfig): Router {
         // Invalid/expired/exhausted invite tokens are silently ignored here —
         // the user still gets logged in, just without campaign membership.
       }
-
-      const sid = await createSession(discordUser.id, cfg.session.maxAgeSeconds);
-      setSessionCookie(res, cfg, sid);
       res.redirect(redirectPath);
     } catch (err) {
       console.error("[auth] OAuth callback failed:", err);

@@ -25,9 +25,8 @@ Built so far:
   automatically once <90% of the 1-year lifetime remains).
 - Three-tier ACL: global `root`, per-campaign `DM`, per-campaign `Player`.
 - Campaign invites: DMs generate Player-only invite links; only root can mint
-  a DM-granting invite. Links are revocable, support optional expiry and
-  use-limits, and optional SMTP email delivery (no-ops cleanly if SMTP isn't
-  configured). Redemption skips the Discord round-trip entirely if you're
+  a DM-granting invite. Links are revocable and support optional expiry and
+  use-limits. Redemption skips the Discord round-trip entirely if you're
   already logged in.
 
 Not yet built: the scheduling/scoring engine, session lifecycle, attendance
