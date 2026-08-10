@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { buildMonthGrid, monthLabel, todayUtc, WEEKDAY_SHORT, addMonthsToYearMonth, type DateStr } from "../dateMath";
+import { buildMonthGrid, monthLabel, todayUtc, blockIndexOf, WEEKDAY_SHORT, addMonthsToYearMonth, type DateStr } from "../dateMath";
 import type { CandidateDate, BlockedDate, Session, AvailabilityAll, Campaign } from "../api";
 import { PipDisplay } from "./PipMeter";
 import { buildAvailabilityMaps, computeDayScore, weightFor, flagsFor, type AvailabilityMaps } from "../scheduling";
@@ -94,6 +94,29 @@ function YourResponseDot({ weight, modifier }: { weight: number; modifier: "Late
     >
       {displayText}
     </span>
+  );
+}
+
+// Alternating colors so consecutive blocks (session-scheduling intervals) are
+// visually distinguishable as you scan down the calendar.
+const BLOCK_STRIPE_COLORS = ["#6f7bd6", "#4a9d8f"];
+
+/** Thin colored bar flush against a cell's left edge. Adjacent days in the same
+ * block share a color, so the bars read as one continuous line down the block
+ * and visibly change color where one block ends and the next begins. */
+function BlockEdge({ color }: { color: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        bottom: 0,
+        width: 3,
+        background: color,
+      }}
+    />
   );
 }
 
@@ -261,6 +284,8 @@ export function CalendarMonth({
           const isDisabledForEdit = isPast && !session;
           const isSelected = selectedDates.has(date);
           const { weight, modifier } = getResponseDetails(maps, currentUserId, date);
+          const blockIdx = blockIndexOf(campaign.start_date, campaign.interval_weeks, date);
+          const blockColor = BLOCK_STRIPE_COLORS[((blockIdx % 2) + 2) % 2];
 
           return (
             <button
@@ -291,6 +316,7 @@ export function CalendarMonth({
                 overflow: "hidden",
               }}
             >
+              {inMonth && <BlockEdge color={blockColor} />}
               {inMonth && <YourResponseDot weight={weight} modifier={modifier} />}
               <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-soft)" }}>
                 {Number(date.slice(8, 10))}
@@ -357,6 +383,14 @@ export function CalendarMonth({
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <span style={{ fontSize: 9, fontWeight: 700, color: "var(--pp-brass)" }}>Yes (Late)</span>
           badge in corner = your response
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={{ display: "inline-flex", gap: 2 }}>
+            {BLOCK_STRIPE_COLORS.map((c) => (
+              <span key={c} style={{ width: 3, height: 12, background: c, borderRadius: 1 }} />
+            ))}
+          </span>
+          left edge = block boundary
         </span>
         <span>Tap a day for details</span>
       </div>
