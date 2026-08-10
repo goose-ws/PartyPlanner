@@ -84,7 +84,7 @@ function YourResponseDot({ weight, modifier }: { weight: number; modifier: "Late
       style={{
         position: "absolute",
         top: 3,
-        right: 4,
+        left: 4,
         fontSize: 8.5,
         fontWeight: 700,
         color: color,

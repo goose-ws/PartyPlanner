@@ -1,5 +1,16 @@
+import { DateTime } from "luxon";
 import { db } from "../db/index.js";
-import { addDays, addMonths, dayOfWeek, diffDays, maxDate, todayUtc, type DateStr } from "./dateMath.js";
+import { addDays, addMonths, dayOfWeek, diffDays, maxDate, type DateStr } from "./dateMath.js";
+
+/** "Today" as a calendar date in the campaign's own IANA timezone — NOT the
+ *  server host's local date. dateMath's todayUtc() reads the server
+ *  process's local clock, which in production is the container's system
+ *  timezone (UTC). Near midnight that can roll over to tomorrow before it's
+ *  tomorrow for the campaign's actual timezone, silently excluding "today"
+ *  from the candidate window. Mirrors reminders.ts's localToday(). */
+function localToday(timezone: string): DateStr {
+  return DateTime.now().setZone(timezone).toFormat("yyyy-LL-dd");
+}
 
 export const WEIGHT_LABELS = ["No", "Maybe", "If Needed", "Yes"] as const; // index == weight (0..3)
 
@@ -132,8 +143,9 @@ export async function getCandidateDates(
     .filter((s) => s.status === "scheduled" || s.status === "completed")
     .map((s) => sessionDateOf(s));
 
-  const windowStart = maxDate(todayUtc(), campaign.start_date);
-  const windowEnd = addMonths(todayUtc(), windowMonths);
+  const today = localToday(campaign.timezone);
+  const windowStart = maxDate(today, campaign.start_date);
+  const windowEnd = addMonths(today, windowMonths);
 
   const candidates: CandidateDate[] = [];
   const blocked: BlockedDate[] = [];
