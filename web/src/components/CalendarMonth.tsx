@@ -295,7 +295,6 @@ export function CalendarMonth({
               style={{
                 position: "relative",
                 aspectRatio: "1",
-                minHeight: 64,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
