@@ -25,7 +25,11 @@ export function blockIndexOf(startDate: DateStr, intervalWeeks: number, date: Da
 }
 
 export function todayUtc(): DateStr {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  return `${year}-${month}-${day}`;
 }
 
 /** 0 (Sunday) .. 6 (Saturday) — matches the backend's dayOfWeek() exactly. */
