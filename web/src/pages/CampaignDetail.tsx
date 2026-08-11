@@ -692,6 +692,7 @@ function CampaignTabs({
         campaignId={campaign.id}
         campaignName={campaign.name}
         canManage={canManage}
+        members={availability.members}
         onChanged={reload}
         onViewOnCalendar={jumpToCalendar}
       />

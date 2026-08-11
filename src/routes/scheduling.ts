@@ -12,6 +12,7 @@ import {
   listSessions,
   markAbsent,
   clearAbsence,
+  updateSessionNotes,
 } from "../scheduling/sessionLifecycle.js";
 import type { AppConfig } from "../types/config.js";
 import { buildSessionIcs } from "../scheduling/ics.js";
@@ -134,6 +135,20 @@ export function schedulingRouter(cfg: AppConfig): Router {
       const msg = err?.message ?? "reschedule_failed";
       const status = msg === "session_not_found" ? 404 : msg === "target_block_already_full" ? 409 : 400;
       res.status(status).json({ error: msg });
+    }
+  });
+
+  // Edit notes on any already-locked/completed/skipped session — e.g. adding a
+  // recap after the fact. Deliberately separate from reschedule/cancel so a DM
+  // can amend notes without touching status or timing.
+  router.patch("/campaigns/:campaignId/sessions/:sessionId/notes", requireCampaignRole(["DM"]), async (req, res) => {
+    const notes = typeof req.body?.notes === "string" ? req.body.notes.slice(0, 255) : null;
+    try {
+      await updateSessionNotes(req.params.campaignId!, req.params.sessionId!, notes);
+      res.status(204).end();
+    } catch (err: any) {
+      const msg = err?.message ?? "notes_update_failed";
+      res.status(msg === "session_not_found" ? 404 : 400).json({ error: msg });
     }
   });
 

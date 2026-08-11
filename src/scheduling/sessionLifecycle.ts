@@ -331,7 +331,28 @@ export async function autoCompletePastSessions(campaignId: string): Promise<void
 
 export async function listSessions(campaignId: string) {
   await autoCompletePastSessions(campaignId);
-  return db()("sessions").where({ campaign_id: campaignId }).orderBy("scheduled_start_utc", "desc");
+  const sessions = await db()("sessions").where({ campaign_id: campaignId }).orderBy("scheduled_start_utc", "desc");
+  if (sessions.length === 0) return sessions;
+
+  const absences = await db()("session_absences")
+    .whereIn(
+      "session_id",
+      sessions.map((s) => s.id)
+    )
+    .select("session_id", "discord_id");
+  const bySession = new Map<string, string[]>();
+  for (const a of absences) {
+    const list = bySession.get(a.session_id) ?? [];
+    list.push(a.discord_id);
+    bySession.set(a.session_id, list);
+  }
+  return sessions.map((s) => ({ ...s, absent_discord_ids: bySession.get(s.id) ?? [] }));
+}
+
+/** Edits notes on a session after the fact — e.g. filling in a recap once a past session's already locked/completed. */
+export async function updateSessionNotes(campaignId: string, sessionId: string, notes: string | null): Promise<void> {
+  const updated = await db()("sessions").where({ id: sessionId, campaign_id: campaignId }).update({ notes });
+  if (updated === 0) throw new Error("session_not_found");
 }
 
 /** Passive attendance: absent by exception, present by default (see session_absences). */

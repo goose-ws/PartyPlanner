@@ -76,6 +76,7 @@ export interface Session {
   scheduled_end_utc: string;
   status: "scheduled" | "completed" | "skipped" | "cancelled";
   notes: string | null;
+  absent_discord_ids: string[];
 }
 
 export interface AttendanceRow {
@@ -212,6 +213,18 @@ export const api = {
     campaignId: string,
     input: { date: string; status: "completed" | "cancelled" | "skipped"; notes?: string; absentDiscordIds: string[] }
   ) => request<{ id: string; sessionNumber: number | null }>(`/api/campaigns/${campaignId}/sessions/backfill`, { method: "POST", body: JSON.stringify(input) }),
+  updateSessionNotes: (campaignId: string, sessionId: string, notes: string | null) =>
+    request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/notes`, {
+      method: "PATCH",
+      body: JSON.stringify({ notes }),
+    }),
+  markAbsent: (campaignId: string, sessionId: string, discordId: string, excused = true) =>
+    request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/absences`, {
+      method: "POST",
+      body: JSON.stringify({ discordId, excused }),
+    }),
+  clearAbsence: (campaignId: string, sessionId: string, discordId: string) =>
+    request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/absences/${discordId}`, { method: "DELETE" }),
 
   getBlockStatus: (campaignId: string) =>
     request<{

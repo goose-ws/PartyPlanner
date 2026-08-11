@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type Session } from "../api";
+import { api, type Session, type Member } from "../api";
 import { formatDateHuman } from "../dateMath";
 import { buildGoogleCalendarUrl, buildOutlookUrl, icsDownloadUrl } from "../calendarLinks";
 
@@ -84,11 +84,111 @@ function RescheduleControl({ session, campaignId, onChanged }: { session: Sessio
   );
 }
 
+function AttendanceNotesEditor({
+  session,
+  campaignId,
+  members,
+  onChanged,
+}: {
+  session: Session;
+  campaignId: string;
+  members: Member[];
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [notes, setNotes] = useState(session.notes ?? "");
+  const [busyDiscordId, setBusyDiscordId] = useState<string | null>(null);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const absent = new Set(session.absent_discord_ids);
+
+  async function toggleAttended(discordId: string) {
+    setBusyDiscordId(discordId);
+    setError(null);
+    try {
+      if (absent.has(discordId)) {
+        await api.clearAbsence(campaignId, session.id, discordId);
+      } else {
+        await api.markAbsent(campaignId, session.id, discordId, true);
+      }
+      onChanged();
+    } catch {
+      setError("Couldn't update attendance.");
+    } finally {
+      setBusyDiscordId(null);
+    }
+  }
+
+  async function saveNotes() {
+    setSavingNotes(true);
+    setError(null);
+    try {
+      await api.updateSessionNotes(campaignId, session.id, notes.trim() || null);
+      onChanged();
+    } catch {
+      setError("Couldn't save notes.");
+    } finally {
+      setSavingNotes(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button className="pp-btn pp-btn-ghost" onClick={() => setOpen(true)}>
+        Edit attendance/notes
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 10, minWidth: 220 }}>
+      <div>
+        <label style={{ fontSize: 12, fontWeight: 600, color: "var(--pp-ink-soft)" }}>Who was there?</label>
+        <div style={{ display: "grid", gap: 5, marginTop: 4 }}>
+          {members.map((m) => (
+            <label key={m.discordId} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5 }}>
+              <input
+                type="checkbox"
+                checked={!absent.has(m.discordId)}
+                disabled={busyDiscordId === m.discordId}
+                onChange={() => toggleAttended(m.discordId)}
+              />
+              {m.username}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div className="pp-field">
+        <label htmlFor={`notes-${session.id}`} style={{ fontSize: 12 }}>
+          Notes
+        </label>
+        <div style={{ display: "flex", gap: 6 }}>
+          <input
+            id={`notes-${session.id}`}
+            className="pp-input"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            style={{ padding: "6px 8px" }}
+          />
+          <button className="pp-btn pp-btn-ghost" disabled={savingNotes} onClick={saveNotes}>
+            {savingNotes ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+      {error && <p style={{ color: "var(--pp-crimson)", fontSize: 12 }}>{error}</p>}
+      <button className="pp-btn pp-btn-ghost" onClick={() => setOpen(false)}>
+        Done
+      </button>
+    </div>
+  );
+}
+
 export function SessionsList({
   sessions,
   campaignId,
   campaignName,
   canManage,
+  members,
   onChanged,
   onViewOnCalendar,
 }: {
@@ -96,6 +196,7 @@ export function SessionsList({
   campaignId: string;
   campaignName: string;
   canManage: boolean;
+  members: Member[];
   onChanged: () => void;
   onViewOnCalendar: (date: string) => void;
 }) {
@@ -163,6 +264,9 @@ export function SessionsList({
                 Cancel block
               </button>
             </div>
+          )}
+          {canManage && s.status === "completed" && (
+            <AttendanceNotesEditor session={s} campaignId={campaignId} members={members} onChanged={onChanged} />
           )}
         </div>
       ))}
