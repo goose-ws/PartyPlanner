@@ -144,6 +144,7 @@ function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boo
   >(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   function load() {
     api
@@ -210,61 +211,78 @@ function MemberManager({ campaignId, isRoot }: { campaignId: string; isRoot: boo
       <div style={{ display: "grid", gap: 8 }}>
         {members?.map((m) => {
           const canRemove = isRoot || m.role === "Player";
+          const isExpanded = expandedId === m.discord_id;
           return (
-            <div
-              key={m.discord_id}
-              className="pp-card"
-              style={{
-                padding: "12px 16px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 10,
-                flexWrap: "wrap",
-                opacity: m.excluded_from_scoring ? 0.7 : 1,
-              }}
-            >
-              <span style={{ fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {m.username}
-              </span>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                {m.excluded_from_scoring && (
-                  <span
-                    className="pp-mono"
-                    title="This member's responses are ignored by all scoring calculations"
-                    style={{ fontSize: 10, color: "var(--pp-ink-soft)", fontStyle: "italic" }}
+            <div key={m.discord_id} style={{ display: "grid", gap: 8 }}>
+              <div
+                className="pp-card"
+                style={{
+                  padding: "12px 16px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  flexWrap: "wrap",
+                  opacity: m.excluded_from_scoring ? 0.7 : 1,
+                }}
+              >
+                <span style={{ fontSize: 14, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {m.username}
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  {m.excluded_from_scoring && (
+                    <span
+                      className="pp-mono"
+                      title="This member's responses are ignored by all scoring calculations"
+                      style={{ fontSize: 10, color: "var(--pp-ink-soft)", fontStyle: "italic" }}
+                    >
+                      excluded from scoring
+                    </span>
+                  )}
+                  <RoleBadge role={m.role} />
+                  <button
+                    className="pp-btn pp-btn-ghost"
+                    onClick={() => setExpandedId(isExpanded ? null : m.discord_id)}
+                    title="DM/root-only: view or change this member's default weekly availability"
                   >
-                    excluded from scoring
-                  </span>
-                )}
-                <RoleBadge role={m.role} />
-                <button
-                  className="pp-btn pp-btn-ghost"
-                  disabled={pendingId === m.discord_id}
-                  onClick={() => toggleExclusion(m.discord_id, m.excluded_from_scoring)}
-                  title="DM/root-only: ignore this member's availability in all scoring calculations campaign-wide"
-                >
-                  {pendingId === m.discord_id ? "Updating…" : m.excluded_from_scoring ? "Include in scoring" : "Exclude from scoring"}
-                </button>
-                {isRoot && (
+                    {isExpanded ? "Hide availability" : "Edit availability"}
+                  </button>
                   <button
                     className="pp-btn pp-btn-ghost"
                     disabled={pendingId === m.discord_id}
-                    onClick={() => changeRole(m.discord_id, m.role === "DM" ? "Player" : "DM")}
+                    onClick={() => toggleExclusion(m.discord_id, m.excluded_from_scoring)}
+                    title="DM/root-only: ignore this member's availability in all scoring calculations campaign-wide"
                   >
-                    {pendingId === m.discord_id ? "Updating…" : m.role === "DM" ? "Make Player" : "Make DM"}
+                    {pendingId === m.discord_id ? "Updating…" : m.excluded_from_scoring ? "Include in scoring" : "Exclude from scoring"}
                   </button>
-                )}
-                {canRemove && (
-                  <button
-                    className="pp-btn pp-btn-danger"
-                    disabled={pendingId === m.discord_id}
-                    onClick={() => remove(m.discord_id, m.username)}
-                  >
-                    Remove
-                  </button>
-                )}
+                  {isRoot && (
+                    <button
+                      className="pp-btn pp-btn-ghost"
+                      disabled={pendingId === m.discord_id}
+                      onClick={() => changeRole(m.discord_id, m.role === "DM" ? "Player" : "DM")}
+                    >
+                      {pendingId === m.discord_id ? "Updating…" : m.role === "DM" ? "Make Player" : "Make DM"}
+                    </button>
+                  )}
+                  {canRemove && (
+                    <button
+                      className="pp-btn pp-btn-danger"
+                      disabled={pendingId === m.discord_id}
+                      onClick={() => remove(m.discord_id, m.username)}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </div>
+              {isExpanded && (
+                <WeeklyDefaultsEditor
+                  campaignId={campaignId}
+                  discordId={m.discord_id}
+                  title={`${m.username}'s default weekly availability`}
+                  onSaved={load}
+                />
+              )}
             </div>
           );
         })}
@@ -290,6 +308,9 @@ function SettingsPanel({
   const [sessionsPerInterval, setSessionsPerInterval] = useState(campaign.sessions_per_interval);
   const [blackoutDaysAfterLock, setBlackoutDaysAfterLock] = useState(campaign.blackout_days_after_lock);
   const [minPlayersRequired, setMinPlayersRequired] = useState(campaign.min_players_required);
+  const [dmMaybeModifier, setDmMaybeModifier] = useState(campaign.dm_maybe_modifier);
+  const [dmIfNeededModifier, setDmIfNeededModifier] = useState(campaign.dm_if_needed_modifier);
+  const [lateEarlyPenalty, setLateEarlyPenalty] = useState(campaign.late_early_penalty);
   const [webhookUrl, setWebhookUrl] = useState(campaign.discord_webhook_url ?? "");
   const [advanceDays, setAdvanceDays] = useState(campaign.reminder_advance_days);
   const [finalDays, setFinalDays] = useState(campaign.reminder_final_days);
@@ -347,6 +368,9 @@ function SettingsPanel({
         sessionsPerInterval,
         blackoutDaysAfterLock,
         minPlayersRequired,
+        dmMaybeModifier,
+        dmIfNeededModifier,
+        lateEarlyPenalty,
         discordWebhookUrl: webhookUrl.trim() || null,
         reminderAdvanceDays: advanceDays,
         reminderFinalDays: finalDays,
@@ -447,6 +471,51 @@ function SettingsPanel({
           <p style={{ fontSize: 11, color: "var(--pp-ink-soft)", marginTop: 3 }}>
             Dates with fewer available players than this score 0, same as a DM veto. Excluded members don't count
             toward this headcount either way. Set to 0 to disable.
+          </p>
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-dm-maybe">DM "Maybe" modifier</label>
+          <input
+            id="s-dm-maybe"
+            type="number"
+            step={0.1}
+            className="pp-input"
+            value={dmMaybeModifier}
+            onChange={(e) => setDmMaybeModifier(Number(e.target.value))}
+          />
+          <p style={{ fontSize: 11, color: "var(--pp-ink-soft)", marginTop: 3 }}>
+            Extra weight added (or subtracted) to the DM's own score when the DM responds "Maybe" — everyone else's
+            "Maybe" is unaffected. E.g. -0.5 turns the DM's Maybe into 0.5pt instead of 1pt. 0 = no change.
+          </p>
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-dm-if-needed">DM "If Needed" modifier</label>
+          <input
+            id="s-dm-if-needed"
+            type="number"
+            step={0.1}
+            className="pp-input"
+            value={dmIfNeededModifier}
+            onChange={(e) => setDmIfNeededModifier(Number(e.target.value))}
+          />
+          <p style={{ fontSize: 11, color: "var(--pp-ink-soft)", marginTop: 3 }}>
+            Same as above, but for the DM's "If Needed" responses (normally worth 2pts). 0 = no change.
+          </p>
+        </div>
+        <div className="pp-field">
+          <label htmlFor="s-late-early-penalty">Late/early penalty</label>
+          <input
+            id="s-late-early-penalty"
+            type="number"
+            min={0}
+            step={0.1}
+            className="pp-input"
+            value={lateEarlyPenalty}
+            onChange={(e) => setLateEarlyPenalty(Number(e.target.value))}
+          />
+          <p style={{ fontSize: 11, color: "var(--pp-ink-soft)", marginTop: 3 }}>
+            Deducted from a member's score contribution for each "joining late" or "dropping early" flag on their
+            response, floored at 0. Default 0.5.
           </p>
         </div>
         <div className="pp-field">
@@ -672,6 +741,7 @@ function CampaignTabs({
         <DayDetailModal
           date={selectedDate}
           campaignId={campaign.id}
+          campaign={campaign}
           campaignMyRole={campaign.myRole}
           user={user}
           availability={availability}

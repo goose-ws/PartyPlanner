@@ -21,6 +21,12 @@ export interface CampaignCadence {
   sessions_per_interval: number;
   blackout_days_after_lock: number;
   min_players_required: number;
+  /** Extra weight (+/-) applied only to the DM's own contribution for a raw "Maybe" (weight 1) response. Default 0. */
+  dm_maybe_modifier: number;
+  /** Extra weight (+/-) applied only to the DM's own contribution for a raw "If Needed" (weight 2) response. Default 0. */
+  dm_if_needed_modifier: number;
+  /** Deducted per active joining-late/dropping-early flag, floored at 0 overall. Default 0.5. */
+  late_early_penalty: number;
 }
 
 export interface CandidateDate {
@@ -37,12 +43,12 @@ export interface BlockedDate {
 }
 
 /** Inclusive block index containing `date`, relative to the campaign's anchor. */
-export function blockIndexOf(campaign: CampaignCadence, date: DateStr): number {
+export function blockIndexOf(campaign: Pick<CampaignCadence, "start_date" | "interval_weeks">, date: DateStr): number {
   const blockLengthDays = campaign.interval_weeks * 7;
   return Math.floor(diffDays(campaign.start_date, date) / blockLengthDays);
 }
 
-export function blockRange(campaign: CampaignCadence, blockIndex: number): { start: DateStr; end: DateStr } {
+export function blockRange(campaign: Pick<CampaignCadence, "start_date" | "interval_weeks">, blockIndex: number): { start: DateStr; end: DateStr } {
   const blockLengthDays = campaign.interval_weeks * 7;
   const start = addDays(campaign.start_date, blockIndex * blockLengthDays);
   const end = addDays(start, blockLengthDays); // exclusive
@@ -114,12 +120,24 @@ export async function getCandidateDates(
     return { joiningLate: override?.joiningLate ?? false, droppingEarly: override?.droppingEarly ?? false };
   }
 
-  /** Actual score contribution: raw weight minus 0.5 per active flag, floored at 0. */
+  // Defensive Number() coercion: FLOAT columns come back as JS numbers from
+  // mysql2 already, but this keeps the math safe even if that ever changes.
+  const lateEarlyPenalty = Number(campaign.late_early_penalty ?? 0.5);
+  const dmMaybeModifier = Number(campaign.dm_maybe_modifier ?? 0);
+  const dmIfNeededModifier = Number(campaign.dm_if_needed_modifier ?? 0);
+
+  /**
+   * Actual score contribution: raw weight, plus the DM-only Maybe/If-Needed
+   * modifier when applicable, minus the configured late/early penalty per
+   * active flag — floored at 0 overall.
+   */
   function contributionFor(discordId: string, date: DateStr): number {
     const weight = weightFor(discordId, date);
     const { joiningLate, droppingEarly } = flagsFor(discordId, date);
-    const deduction = (joiningLate ? 0.5 : 0) + (droppingEarly ? 0.5 : 0);
-    return Math.max(0, weight - deduction);
+    const isDm = dmIds.includes(discordId);
+    const dmAdjust = isDm && weight === 1 ? dmMaybeModifier : isDm && weight === 2 ? dmIfNeededModifier : 0;
+    const deduction = (joiningLate ? lateEarlyPenalty : 0) + (droppingEarly ? lateEarlyPenalty : 0);
+    return Math.max(0, weight + dmAdjust - deduction);
   }
 
   // Existing sessions drive block-fullness, skipped blocks, and blackout.

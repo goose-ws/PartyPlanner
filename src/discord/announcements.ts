@@ -10,6 +10,9 @@ interface AnnounceCampaign {
   name: string;
   timezone: string;
   discord_webhook_url: string | null;
+  late_early_penalty: number;
+  dm_maybe_modifier: number;
+  dm_if_needed_modifier: number;
 }
 
 /** Party Planner's brand gold, used as the embed's left accent bar. */
@@ -63,7 +66,7 @@ export async function announceSessionLocked(
 
   const localDate = DateTime.fromJSDate(startUtc, { zone: "utc" }).setZone(campaign.timezone).toFormat("yyyy-LL-dd") as DateStr;
   const responses = await getResponsesForDate(campaign.id, localDate);
-  const roster = rosterLines(responses);
+  const roster = rosterLines(responses, campaign);
 
   const description =
     `📅 **${campaign.name}** will meet on ${when}\n` +

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, type AvailabilityAll, type CandidateDate, type Session, type AuthedUser } from "../api";
+import { api, type AvailabilityAll, type CandidateDate, type Session, type AuthedUser, type Campaign } from "../api";
 import { weightFor, flagsFor, buildAvailabilityMaps, contributionFor } from "../scheduling";
 import { PipDisplay, WeightPicker } from "./PipMeter";
 import { RoleBadge } from "./RoleBadge";
@@ -57,6 +57,7 @@ function FlagChip({ label, active, onToggle, disabled }: { label: string; active
 export function DayDetailModal({
   date,
   campaignId,
+  campaign,
   campaignMyRole,
   user,
   availability,
@@ -67,6 +68,7 @@ export function DayDetailModal({
 }: {
   date: DateStr;
   campaignId: string;
+  campaign: Campaign;
   campaignMyRole: "DM" | "Player" | undefined;
   user: AuthedUser;
   availability: AvailabilityAll;
@@ -247,7 +249,10 @@ export function DayDetailModal({
                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                     <span style={{ fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.username}</span>
                     <RoleBadge role={m.role} />
-                    <ScoreTag score={contributionFor(maps, m.discordId, date)} excluded={m.excludedFromScoring} />
+                    <ScoreTag
+                      score={contributionFor(maps, m.discordId, date, m.role === "DM", campaign)}
+                      excluded={m.excludedFromScoring}
+                    />
                   </div>
                   {editable ? (
                     <WeightPicker weight={w} onChange={(next) => saveResponse(m.discordId, next, flags.joiningLate, flags.droppingEarly)} disabled={busy} />

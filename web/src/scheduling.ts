@@ -38,26 +38,47 @@ export function flagsFor(maps: AvailabilityMaps, discordId: string, date: DateSt
   return { joiningLate: override?.joiningLate ?? false, droppingEarly: override?.droppingEarly ?? false };
 }
 
-/** Actual score contribution: raw weight minus 0.5 per active flag, floored at 0 — mirrors the backend exactly. */
-export function contributionFor(maps: AvailabilityMaps, discordId: string, date: DateStr): number {
+/** The subset of a campaign's settings that scoring needs — Campaign itself satisfies this. */
+export interface ScoringCampaign {
+  min_players_required: number;
+  dm_maybe_modifier: number;
+  dm_if_needed_modifier: number;
+  late_early_penalty: number;
+}
+
+/**
+ * Actual score contribution: raw weight, plus the DM-only Maybe/If-Needed
+ * modifier when applicable, minus the campaign's configured late/early
+ * penalty per active flag — floored at 0 overall. Mirrors the backend exactly.
+ */
+export function contributionFor(
+  maps: AvailabilityMaps,
+  discordId: string,
+  date: DateStr,
+  isDm: boolean,
+  campaign: ScoringCampaign
+): number {
   const weight = weightFor(maps, discordId, date);
   const { joiningLate, droppingEarly } = flagsFor(maps, discordId, date);
-  const deduction = (joiningLate ? 0.5 : 0) + (droppingEarly ? 0.5 : 0);
-  return Math.max(0, weight - deduction);
+  const dmAdjust = isDm && weight === 1 ? campaign.dm_maybe_modifier : isDm && weight === 2 ? campaign.dm_if_needed_modifier : 0;
+  const penalty = campaign.late_early_penalty;
+  const deduction = (joiningLate ? penalty : 0) + (droppingEarly ? penalty : 0);
+  return Math.max(0, weight + dmAdjust - deduction);
 }
 
 /**
  * Computes the same score/DM-veto/min-players logic as the backend candidate
  * engine, but for ANY date — including already-locked ones, which the
  * candidates list deliberately excludes since it only covers open (unlocked)
- * dates.
+ * dates. Also splits the total into the Player-only sum ("P") and the
+ * DM-only sum ("DM") for display.
  */
 export function computeDayScore(
   maps: AvailabilityMaps,
   members: AvailabilityAll["members"],
   date: DateStr,
-  minPlayersRequired = 0
-): { score: number; isDmAvailable: boolean; isAboveMinPlayers: boolean } {
+  campaign: ScoringCampaign
+): { score: number; playerScore: number; dmScore: number; isDmAvailable: boolean; isAboveMinPlayers: boolean } {
   // "Ignore their values entirely" — excluded members don't count toward the
   // score sum, the DM veto, or the min-players headcount below.
   const activeDmIds = members.filter((m) => m.role === "DM" && !m.excludedFromScoring).map((m) => m.discordId);
@@ -65,13 +86,20 @@ export function computeDayScore(
 
   const activePlayerIds = members.filter((m) => m.role === "Player" && !m.excludedFromScoring).map((m) => m.discordId);
   const availablePlayerCount = activePlayerIds.filter((id) => weightFor(maps, id, date) > 0).length;
-  const isAboveMinPlayers = availablePlayerCount >= minPlayersRequired;
+  const isAboveMinPlayers = availablePlayerCount >= campaign.min_players_required;
 
-  const score =
-    isDmAvailable && isAboveMinPlayers
-      ? members
-          .filter((m) => !m.excludedFromScoring)
-          .reduce((sum, m) => sum + contributionFor(maps, m.discordId, date), 0)
-      : 0;
-  return { score, isDmAvailable, isAboveMinPlayers };
+  const scoringMembers = members.filter((m) => !m.excludedFromScoring);
+  const veto = !(isDmAvailable && isAboveMinPlayers);
+  const playerScore = veto
+    ? 0
+    : scoringMembers
+        .filter((m) => m.role === "Player")
+        .reduce((sum, m) => sum + contributionFor(maps, m.discordId, date, false, campaign), 0);
+  const dmScore = veto
+    ? 0
+    : scoringMembers
+        .filter((m) => m.role === "DM")
+        .reduce((sum, m) => sum + contributionFor(maps, m.discordId, date, true, campaign), 0);
+  const score = playerScore + dmScore;
+  return { score, playerScore, dmScore, isDmAvailable, isAboveMinPlayers };
 }

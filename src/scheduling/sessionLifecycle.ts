@@ -18,6 +18,9 @@ interface CampaignForLifecycle {
   timezone: string;
   last_session_number: number;
   discord_webhook_url: string | null;
+  late_early_penalty: number;
+  dm_maybe_modifier: number;
+  dm_if_needed_modifier: number;
 }
 
 /**

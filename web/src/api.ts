@@ -15,6 +15,9 @@ export interface Campaign {
   sessions_per_interval: number;
   blackout_days_after_lock: number;
   min_players_required: number; // 0 = no minimum enforced
+  dm_maybe_modifier: number; // extra weight (+/-) applied only to the DM's own contribution for a raw "Maybe" response; 0 = no change
+  dm_if_needed_modifier: number; // extra weight (+/-) applied only to the DM's own contribution for a raw "If Needed" response; 0 = no change
+  late_early_penalty: number; // deducted per active joining-late/dropping-early flag, floored at 0 overall; default 0.5
   session_time_start: string;
   session_time_end: string;
   timezone: string;
@@ -129,6 +132,9 @@ export const api = {
       sessionsPerInterval: number;
       blackoutDaysAfterLock: number;
       minPlayersRequired: number;
+      dmMaybeModifier: number;
+      dmIfNeededModifier: number;
+      lateEarlyPenalty: number;
       discordWebhookUrl: string | null;
       reminderAdvanceDays: number;
       reminderFinalDays: number;

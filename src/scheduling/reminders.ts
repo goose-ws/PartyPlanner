@@ -237,12 +237,22 @@ export async function getResponsesForDate(
   campaignId: string,
   date: DateStr
 ): Promise<
-  Array<{ discordId: string; username: string; weight: number; joiningLate: boolean; droppingEarly: boolean; excluded: boolean }>
+  Array<{
+    discordId: string;
+    username: string;
+    weight: number;
+    joiningLate: boolean;
+    droppingEarly: boolean;
+    excluded: boolean;
+    role: "DM" | "Player";
+  }>
 > {
-  const members: Array<{ discord_id: string; username: string; excluded_from_scoring: boolean }> = await db()("campaign_members")
+  const members: Array<{ discord_id: string; username: string; excluded_from_scoring: boolean; role: "DM" | "Player" }> = await db()(
+    "campaign_members"
+  )
     .join("users", "users.discord_id", "campaign_members.discord_id")
     .where("campaign_members.campaign_id", campaignId)
-    .select("users.discord_id", "users.username", "campaign_members.excluded_from_scoring");
+    .select("users.discord_id", "users.username", "campaign_members.excluded_from_scoring", "campaign_members.role");
 
   const defaults: Array<{ discord_id: string; day_of_week: number; weight: number }> = await db()("default_availability").where({
     campaign_id: campaignId,
@@ -264,14 +274,27 @@ export async function getResponsesForDate(
       joiningLate: !!override?.joining_late,
       droppingEarly: !!override?.dropping_early,
       excluded: !!m.excluded_from_scoring,
+      role: m.role,
     };
   });
 }
 
-/** Raw weight minus 0.5 per active flag, floored at 0 — mirrors candidateEngine's contributionFor exactly. */
-function contributionFor(r: { weight: number; joiningLate: boolean; droppingEarly: boolean }): number {
-  const deduction = (r.joiningLate ? 0.5 : 0) + (r.droppingEarly ? 0.5 : 0);
-  return Math.max(0, r.weight - deduction);
+export interface ScoringSettings {
+  late_early_penalty: number;
+  dm_maybe_modifier: number;
+  dm_if_needed_modifier: number;
+}
+
+/** Raw weight, DM-only Maybe/If-Needed modifier, minus the configured late/early penalty per active flag, floored at 0 — mirrors candidateEngine's contributionFor exactly. */
+function contributionFor(
+  r: { weight: number; joiningLate: boolean; droppingEarly: boolean; role: "DM" | "Player" },
+  settings: ScoringSettings
+): number {
+  const isDm = r.role === "DM";
+  const dmAdjust = isDm && r.weight === 1 ? settings.dm_maybe_modifier : isDm && r.weight === 2 ? settings.dm_if_needed_modifier : 0;
+  const penalty = settings.late_early_penalty;
+  const deduction = (r.joiningLate ? penalty : 0) + (r.droppingEarly ? penalty : 0);
+  return Math.max(0, r.weight + dmAdjust - deduction);
 }
 
 /**
@@ -287,13 +310,21 @@ function contributionFor(r: { weight: number; joiningLate: boolean; droppingEarl
  * counting toward the total.
  */
 export function rosterLines(
-  responses: Array<{ discordId: string; weight: number; joiningLate: boolean; droppingEarly: boolean; excluded: boolean }>
+  responses: Array<{
+    discordId: string;
+    weight: number;
+    joiningLate: boolean;
+    droppingEarly: boolean;
+    excluded: boolean;
+    role: "DM" | "Player";
+  }>,
+  settings: ScoringSettings
 ): string {
   if (responses.length === 0) return "_(no one on the roster yet)_";
   return responses
     .map((r) => {
       const flags = [r.joiningLate && "joining late", r.droppingEarly && "dropping early"].filter(Boolean).join(", ");
-      const pts = contributionFor(r);
+      const pts = contributionFor(r, settings);
       const ptsDisplay = Number.isInteger(pts) ? String(pts) : pts.toFixed(1);
       if (r.excluded) {
         return `${WEIGHT_EMOJI[r.weight]} <@${r.discordId}> — ${WEIGHT_LABELS[r.weight]} _(excluded from scoring)_`;
@@ -308,12 +339,20 @@ function buildDayOfPayload(
   campaignName: string,
   session: { session_number: number | null; scheduled_start_utc: string },
   timezone: string,
-  responses: Array<{ discordId: string; weight: number; joiningLate: boolean; droppingEarly: boolean; excluded: boolean }>
+  responses: Array<{
+    discordId: string;
+    weight: number;
+    joiningLate: boolean;
+    droppingEarly: boolean;
+    excluded: boolean;
+    role: "DM" | "Player";
+  }>,
+  settings: ScoringSettings
 ): DiscordPayload {
   const when = DateTime.fromJSDate(new Date(session.scheduled_start_utc.replace(" ", "T") + "Z"), { zone: "utc" })
     .setZone(timezone)
     .toFormat("h:mm a ZZZZ");
-  const description = `🎲 Session ${session.session_number} is today at **${when}**\n\n**Roster:**\n${rosterLines(responses)}`;
+  const description = `🎲 Session ${session.session_number} is today at **${when}**\n\n**Roster:**\n${rosterLines(responses, settings)}`;
   return {
     embeds: [
       {
@@ -366,7 +405,7 @@ export async function composeDayOfReminder(campaignId: string): Promise<{ ok: tr
   if (!session) return { ok: false, reason: "no_upcoming_session" };
 
   const responses = await getResponsesForDate(campaignId, localDateOf(session.scheduled_start_utc, campaign.timezone));
-  const payload = buildDayOfPayload(campaign.name, session, campaign.timezone, responses);
+  const payload = buildDayOfPayload(campaign.name, session, campaign.timezone, responses, campaign);
   // The preview/test UI just shows plain text, so surface the embed's
   // description — @mentions won't resolve there, but the structure is
   // otherwise exactly what gets posted to Discord.
@@ -461,7 +500,7 @@ async function checkDayOfReminder(campaign: any): Promise<void> {
   if (!session) return;
 
   const responses = await getResponsesForDate(campaign.id, localDateOf(session.scheduled_start_utc, campaign.timezone));
-  const payload = buildDayOfPayload(campaign.name, session, campaign.timezone, responses);
+  const payload = buildDayOfPayload(campaign.name, session, campaign.timezone, responses, campaign);
   await sendDiscordMessage(campaign.discord_webhook_url, payload);
   await db()("sessions").where({ id: session.id }).update({ dayof_reminder_sent: true });
   await logAudit("reminder.dayof_sent", { campaignId: campaign.id, detail: { sessionId: session.id, sessionNumber: session.session_number } });

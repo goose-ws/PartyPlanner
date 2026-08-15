@@ -69,6 +69,26 @@ function ScoreBadge({
   );
 }
 
+/** Small breakdown line under the total score badge: "P" (player sum) and "DM" (DM's own score). */
+function ScoreBreakdown({ playerScore, dmScore }: { playerScore: number; dmScore: number }) {
+  const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+  return (
+    <span
+      title={`Player sum: ${fmt(playerScore)} · DM score: ${fmt(dmScore)}`}
+      className="pp-mono"
+      style={{
+        fontSize: 8,
+        fontWeight: 600,
+        color: "var(--pp-ink-soft)",
+        lineHeight: 1.2,
+        whiteSpace: "nowrap",
+      }}
+    >
+      P {fmt(playerScore)} · DM {fmt(dmScore)}
+    </span>
+  );
+}
+
 /** Small text badge showing the CURRENT user's base response (Yes/If/Mb/No) + modifier (Late/Early) */
 function YourResponseDot({ weight, modifier }: { weight: number; modifier: "Late" | "Early" | null }) {
   const baseLabel = WEIGHT_SHORT[weight];
@@ -276,10 +296,10 @@ export function CalendarMonth({
           const heatIntensity = candidate ? Math.min(1, candidate.score / maxPossibleScore) : 0;
           const heatBg = candidate ? `rgba(192, 138, 46, ${(heatIntensity * 0.5).toFixed(3)})` : undefined;
 
-          const sessionScore =
-            session && (session.status === "scheduled" || session.status === "completed")
-              ? computeDayScore(maps, availability.members, date, campaign.min_players_required)
-              : null;
+          const dayScore =
+            session ? (session.status === "scheduled" || session.status === "completed" ? computeDayScore(maps, availability.members, date, campaign) : null)
+            : candidate ? computeDayScore(maps, availability.members, date, campaign)
+            : null;
 
           const isDisabledForEdit = isPast && !session;
           const isSelected = selectedDates.has(date);
@@ -323,24 +343,30 @@ export function CalendarMonth({
 
               {session ? (
                 <>
-                  {sessionScore && (
-                    <ScoreBadge
-                      score={sessionScore.score}
-                      isDmAvailable={sessionScore.isDmAvailable}
-                      isAboveMinPlayers={sessionScore.isAboveMinPlayers}
-                    />
+                  {dayScore && (
+                    <>
+                      <ScoreBadge
+                        score={dayScore.score}
+                        isDmAvailable={dayScore.isDmAvailable}
+                        isAboveMinPlayers={dayScore.isAboveMinPlayers}
+                      />
+                      <ScoreBreakdown playerScore={dayScore.playerScore} dmScore={dayScore.dmScore} />
+                    </>
                   )}
                   <span style={{ fontSize: 9, fontWeight: 600, color: "var(--pp-ink-soft)", textAlign: "center", lineHeight: 1.2 }}>
                     {STATUS_STYLE[session.status]?.label}
                     {session.session_number ? ` #${session.session_number}` : ""}
                   </span>
                 </>
-              ) : candidate ? (
-                <ScoreBadge
-                  score={candidate.score}
-                  isDmAvailable={candidate.isDmAvailable}
-                  isAboveMinPlayers={candidate.isAboveMinPlayers}
-                />
+              ) : candidate && dayScore ? (
+                <>
+                  <ScoreBadge
+                    score={dayScore.score}
+                    isDmAvailable={dayScore.isDmAvailable}
+                    isAboveMinPlayers={dayScore.isAboveMinPlayers}
+                  />
+                  <ScoreBreakdown playerScore={dayScore.playerScore} dmScore={dayScore.dmScore} />
+                </>
               ) : blockedEntry ? (
                 <span style={{ fontSize: 8, color: "var(--pp-ink-soft)" }}>·</span>
               ) : null}
@@ -366,6 +392,12 @@ export function CalendarMonth({
             6
           </span>{" "}
           = total score for that date
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span className="pp-mono" style={{ fontSize: 9, color: "var(--pp-ink-soft)" }}>
+            P 4 · DM 2
+          </span>{" "}
+          = player sum / DM's own score, under the total
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <PipDisplay weight={3} size={6} />

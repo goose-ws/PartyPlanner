@@ -139,6 +139,32 @@ export function campaignsRouter(): Router {
       }
       updates.min_players_required = req.body.minPlayersRequired;
     }
+    // Extra weight (+/-) applied only to the DM's own contribution for a
+    // raw "Maybe"/"If Needed" response — any finite number is valid,
+    // since a table might reasonably want to boost or discount it either way.
+    if (req.body?.dmMaybeModifier !== undefined) {
+      if (typeof req.body.dmMaybeModifier !== "number" || !Number.isFinite(req.body.dmMaybeModifier)) {
+        res.status(400).json({ error: "invalid_dmMaybeModifier" });
+        return;
+      }
+      updates.dm_maybe_modifier = req.body.dmMaybeModifier;
+    }
+    if (req.body?.dmIfNeededModifier !== undefined) {
+      if (typeof req.body.dmIfNeededModifier !== "number" || !Number.isFinite(req.body.dmIfNeededModifier)) {
+        res.status(400).json({ error: "invalid_dmIfNeededModifier" });
+        return;
+      }
+      updates.dm_if_needed_modifier = req.body.dmIfNeededModifier;
+    }
+    // Deducted per active joining-late/dropping-early flag (score floored
+    // at 0 overall) — kept non-negative since it's framed as a penalty.
+    if (req.body?.lateEarlyPenalty !== undefined) {
+      if (typeof req.body.lateEarlyPenalty !== "number" || !Number.isFinite(req.body.lateEarlyPenalty) || req.body.lateEarlyPenalty < 0) {
+        res.status(400).json({ error: "invalid_lateEarlyPenalty" });
+        return;
+      }
+      updates.late_early_penalty = req.body.lateEarlyPenalty;
+    }
 
     if (req.body?.discordWebhookUrl !== undefined) {
       const url = req.body.discordWebhookUrl;
