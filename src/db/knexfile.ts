@@ -39,6 +39,17 @@ export function buildKnexConfig(cfg: AppConfig): Knex.Config {
       // availability scoring. The scheduling engine treats all of these as
       // strings throughout.
       dateStrings: true,
+      // mysql2 defaults to 'local': when a JS Date object is bound as a
+      // query parameter (e.g. sessionLifecycle.ts writing scheduled_start_utc
+      // from Luxon's .toJSDate()), it gets formatted using the Node
+      // process's local system timezone, not UTC. Every read path in this
+      // app (dateStrings above, plus reminders/announcements) treats stored
+      // DATETIME strings as literal UTC digits — if the server's local TZ
+      // isn't UTC, writes and reads disagree and the campaign's configured
+      // timezone effectively gets applied twice on display. Forcing 'Z'
+      // here makes Date-object writes always serialize in UTC, regardless
+      // of the host's local timezone.
+      timezone: "Z",
       typeCast: function (field: TypeCastField, next: TypeCastNext) {
         // Return TINYINT(1) as boolean instead of 0/1, matches MariaDB's BOOLEAN alias.
         if (field.type === "TINY" && field.length === 1) {
