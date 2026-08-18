@@ -1,3 +1,5 @@
+import { DateTime } from "luxon";
+
 /** All dates in this module are plain 'YYYY-MM-DD' strings — no timezone, no Date objects. */
 export type DateStr = string;
 
@@ -29,12 +31,24 @@ export function dayOfWeek(date: DateStr): number {
   return ((toEpochDay(date) + 4) % 7 + 7) % 7;
 }
 
-export function todayUtc(): DateStr {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+/**
+ * "Today" as a calendar date in the GIVEN IANA timezone — this is the only
+ * correct way to get "today" for anything campaign-specific (reminder
+ * staging, block confirmation cutoffs, candidate-date windows, etc).
+ *
+ * There used to be a todayUtc() here that read the server process's local
+ * clock via Date.getFullYear()/getMonth()/getDate() (local getters, despite
+ * the name) and was used directly as a stand-in for "today" in several
+ * places. That's wrong on two independent axes: (1) it's actually local
+ * time, not UTC, so it silently depended on the host's system TZ being UTC;
+ * and (2) even true UTC "today" isn't what any campaign-specific day
+ * boundary wants — a campaign in America/New_York needs America/New_York's
+ * calendar date, not the host's or UTC's, or reminders/confirmations can be
+ * off by a day right around midnight in whichever zone won the coin flip.
+ * Always call this with the campaign's own timezone instead.
+ */
+export function localToday(timezone: string): DateStr {
+  return DateTime.now().setZone(timezone).toFormat("yyyy-LL-dd");
 }
 
 export function isBefore(a: DateStr, b: DateStr): boolean {

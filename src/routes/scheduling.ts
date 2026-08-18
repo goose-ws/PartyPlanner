@@ -178,8 +178,12 @@ export function schedulingRouter(cfg: AppConfig): Router {
         return;
       }
       const excused = req.body?.excused !== false;
-      await markAbsent(req.params.sessionId!, discordId, excused);
-      res.status(204).end();
+      try {
+        await markAbsent(req.params.campaignId!, req.params.sessionId!, discordId, excused);
+        res.status(204).end();
+      } catch (err: any) {
+        res.status(err?.message === "session_not_found" ? 404 : 500).json({ error: err?.message ?? "mark_absent_failed" });
+      }
     }
   );
 
@@ -187,8 +191,12 @@ export function schedulingRouter(cfg: AppConfig): Router {
     "/campaigns/:campaignId/sessions/:sessionId/absences/:discordId",
     requireCampaignRole(["DM"]),
     async (req, res) => {
-      await clearAbsence(req.params.sessionId!, req.params.discordId!);
-      res.status(204).end();
+      try {
+        await clearAbsence(req.params.campaignId!, req.params.sessionId!, req.params.discordId!);
+        res.status(204).end();
+      } catch (err: any) {
+        res.status(err?.message === "session_not_found" ? 404 : 500).json({ error: err?.message ?? "clear_absence_failed" });
+      }
     }
   );
 

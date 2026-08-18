@@ -1,16 +1,8 @@
 import { DateTime } from "luxon";
 import { db } from "../db/index.js";
-import { addDays, addMonths, dayOfWeek, diffDays, maxDate, type DateStr } from "./dateMath.js";
+import { addDays, addMonths, dayOfWeek, diffDays, localToday, maxDate, type DateStr } from "./dateMath.js";
 
-/** "Today" as a calendar date in the campaign's own IANA timezone — NOT the
- *  server host's local date. dateMath's todayUtc() reads the server
- *  process's local clock, which in production is the container's system
- *  timezone (UTC). Near midnight that can roll over to tomorrow before it's
- *  tomorrow for the campaign's actual timezone, silently excluding "today"
- *  from the candidate window. Mirrors reminders.ts's localToday(). */
-function localToday(timezone: string): DateStr {
-  return DateTime.now().setZone(timezone).toFormat("yyyy-LL-dd");
-}
+/** "Today" as a calendar date in the campaign's own IANA timezone — see dateMath.ts's localToday() for why this matters. */
 
 export const WEIGHT_LABELS = ["No", "Maybe", "If Needed", "Yes"] as const; // index == weight (0..3)
 

@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { db } from "../db/index.js";
 import { blockIndexOf, blockRange, type CampaignCadence } from "./candidateEngine.js";
-import { addDays, diffDays, maxDate, todayUtc, type DateStr } from "./dateMath.js";
+import { addDays, diffDays, localToday, maxDate, type DateStr } from "./dateMath.js";
 import { sendDiscordMessage, type DiscordPayload } from "../discord/webhook.js";
 import { getBlockConfirmationStatus } from "./blockConfirmations.js";
 import { signConfirmToken } from "./confirmToken.js";
@@ -24,7 +24,7 @@ export interface ActiveBlock {
  * Schedule tab's check-in card shows).
  */
 export async function getOpenBlocks(campaignId: string, limit: number): Promise<ActiveBlock[]> {
-  const campaign: CampaignCadence & { sessions_per_interval: number } = await db()("campaigns")
+  const campaign: CampaignCadence & { sessions_per_interval: number; timezone: string } = await db()("campaigns")
     .where({ id: campaignId })
     .first();
   if (!campaign) return [];
@@ -42,7 +42,7 @@ export async function getOpenBlocks(campaignId: string, limit: number): Promise<
     occupancy.set(idx, (occupancy.get(idx) ?? 0) + 1);
   }
 
-  const startIdx = blockIndexOf(campaign, maxDate(todayUtc(), campaign.start_date));
+  const startIdx = blockIndexOf(campaign, maxDate(localToday(campaign.timezone), campaign.start_date));
   const found: ActiveBlock[] = [];
   for (let i = startIdx; i < startIdx + MAX_BLOCKS_TO_SCAN && found.length < limit; i++) {
     if (skippedBlocks.has(i)) continue;
@@ -417,10 +417,6 @@ function isPastLocalTime(timezone: string, timeOfDay: string): boolean {
   return nowLocal >= timeOfDay.slice(0, 5);
 }
 
-function localToday(timezone: string): DateStr {
-  return DateTime.now().setZone(timezone).toFormat("yyyy-LL-dd");
-}
-
 /** The session's actual local calendar date in the campaign's timezone — NOT scheduled_start_utc.slice(0,10), which is the UTC date and can differ near midnight. */
 export function localDateOf(mysqlDatetimeUtc: string, timezone: string): DateStr {
   return DateTime.fromJSDate(new Date(mysqlDatetimeUtc.replace(" ", "T") + "Z"), { zone: "utc" })
@@ -455,7 +451,7 @@ async function checkStageReminder(cfg: AppConfig, campaign: any): Promise<void> 
   const block = await getActiveBlock(campaign.id);
   if (!block) return;
 
-  const daysUntil = diffDays(todayUtc(), block.start);
+  const daysUntil = diffDays(localToday(campaign.timezone), block.start);
   const stage = stageForDaysUntil(daysUntil, campaign.reminder_advance_days, campaign.reminder_final_days);
   if (stage === 0) return;
   if (stage === 1 && !campaign.reminder_advance_enabled) return;
@@ -520,7 +516,7 @@ async function checkLockWarning(campaign: any): Promise<void> {
   const block = await getActiveBlock(campaign.id);
   if (!block) return; // nothing open (e.g. everything's already locked/skipped) — nothing to warn about
 
-  const daysUntil = diffDays(todayUtc(), block.start);
+  const daysUntil = diffDays(localToday(campaign.timezone), block.start);
   if (daysUntil > campaign.reminder_lock_warning_days) return; // not time yet
   if (daysUntil < 0) return; // block's already underway — advance/final already covered this urgency
 

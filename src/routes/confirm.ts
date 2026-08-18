@@ -26,6 +26,16 @@ function page(title: string, bodyHtml: string): string {
 </html>`;
 }
 
+/** HTML-escapes a value before it's interpolated into page()'s bodyHtml — campaign.name (root-settable) and req.user.username (a Discord display name, entirely user-controlled) both flow into these pages, so every interpolated value needs this, not just obviously-"untrusted" ones. */
+function esc(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function confirmPageRouter(cfg: AppConfig) {
   const router = Router();
 
@@ -65,7 +75,7 @@ export function confirmPageRouter(cfg: AppConfig) {
       res.status(403).send(
         page(
           "Not your link",
-          `<div class="icon">🚫</div><h1>This confirmation isn't for you</h1><p>You're logged in as <strong>${req.user.username}</strong>, but this link is for a different member of <strong>${campaign.name}</strong>. If you think this is your link, make sure you're signed into Party Planner as the right Discord account.</p>`
+          `<div class="icon">🚫</div><h1>This confirmation isn't for you</h1><p>You're logged in as <strong>${esc(req.user.username)}</strong>, but this link is for a different member of <strong>${esc(campaign.name)}</strong>. If you think this is your link, make sure you're signed into Party Planner as the right Discord account.</p>`
         )
       );
       return;
@@ -82,7 +92,7 @@ export function confirmPageRouter(cfg: AppConfig) {
     res.send(
       page(
         "Confirmed",
-        `<div class="icon">✅</div><h1>You're confirmed!</h1><p>Your availability for <strong>${campaign.name}</strong> is locked in for this window.</p><div class="meta">${payload.blockStart} → ${blockEndInclusive}</div>`
+        `<div class="icon">✅</div><h1>You're confirmed!</h1><p>Your availability for <strong>${esc(campaign.name)}</strong> is locked in for this window.</p><div class="meta">${esc(payload.blockStart)} → ${esc(blockEndInclusive)}</div>`
       )
     );
   });

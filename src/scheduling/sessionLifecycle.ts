@@ -358,14 +358,18 @@ export async function updateSessionNotes(campaignId: string, sessionId: string, 
   if (updated === 0) throw new Error("session_not_found");
 }
 
-/** Passive attendance: absent by exception, present by default (see session_absences). */
-export async function markAbsent(sessionId: string, discordId: string, excused: boolean): Promise<void> {
+/** Passive attendance: absent by exception, present by default (see session_absences). Scoped to campaignId so a DM of one campaign can't touch another campaign's sessions by guessing/reusing a sessionId. */
+export async function markAbsent(campaignId: string, sessionId: string, discordId: string, excused: boolean): Promise<void> {
+  const session = await db()("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
+  if (!session) throw new Error("session_not_found");
   await db()("session_absences")
     .insert({ session_id: sessionId, discord_id: discordId, excused })
     .onConflict(["session_id", "discord_id"])
     .merge({ excused });
 }
 
-export async function clearAbsence(sessionId: string, discordId: string): Promise<void> {
+export async function clearAbsence(campaignId: string, sessionId: string, discordId: string): Promise<void> {
+  const session = await db()("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
+  if (!session) throw new Error("session_not_found");
   await db()("session_absences").where({ session_id: sessionId, discord_id: discordId }).delete();
 }

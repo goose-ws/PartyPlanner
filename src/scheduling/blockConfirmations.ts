@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { db } from "../db/index.js";
-import { todayUtc, type DateStr } from "./dateMath.js";
+import { localToday, type DateStr } from "./dateMath.js";
 
 /** Marks (or re-marks) a member as having confirmed their availability for a specific block. Idempotent. */
 export async function confirmBlock(campaignId: string, discordId: string, blockStart: DateStr): Promise<void> {
@@ -34,9 +34,16 @@ export async function isBlockConfirmed(campaignId: string, discordId: string, bl
  * genuinely still matter for confirming.
  */
 export async function invalidateFutureConfirmations(campaignId: string, discordId: string): Promise<void> {
+  // "block_start >= today" needs the CAMPAIGN's own calendar date, not the
+  // host's — getting this wrong in the direction of an earlier "today"
+  // would skip clearing confirmations for blocks that are still upcoming
+  // from the campaign's own perspective, leaving a stale "confirmed" flag
+  // in place after the member actually changed their availability.
+  const campaign = await db()("campaigns").where({ id: campaignId }).first();
+  const today = campaign ? localToday(campaign.timezone) : new Date().toISOString().slice(0, 10);
   await db()("block_confirmations")
     .where({ campaign_id: campaignId, discord_id: discordId })
-    .andWhere("block_start", ">=", todayUtc())
+    .andWhere("block_start", ">=", today)
     .delete();
 }
 
