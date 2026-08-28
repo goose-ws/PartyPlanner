@@ -275,6 +275,10 @@ export async function backfillSession(
       scheduled_end_utc: endUtc,
       status: input.status,
       notes: input.notes,
+      // A backfilled "completed" session always has its roster typed in by
+      // hand right here — that's a review, not a default. Skipped/cancelled
+      // backfills don't have attendance to review at all; leave them NULL.
+      attendance_confirmed_at: input.status === "completed" ? trx.fn.now() : null,
     });
 
     for (const discordId of input.absentDiscordIds) {
@@ -354,7 +358,9 @@ export async function listSessions(campaignId: string) {
 
 /** Edits notes on a session after the fact — e.g. filling in a recap once a past session's already locked/completed. */
 export async function updateSessionNotes(campaignId: string, sessionId: string, notes: string | null): Promise<void> {
-  const updated = await db()("sessions").where({ id: sessionId, campaign_id: campaignId }).update({ notes });
+  const updated = await db()("sessions")
+    .where({ id: sessionId, campaign_id: campaignId })
+    .update({ notes, attendance_confirmed_at: db().fn.now() });
   if (updated === 0) throw new Error("session_not_found");
 }
 
@@ -366,10 +372,27 @@ export async function markAbsent(campaignId: string, sessionId: string, discordI
     .insert({ session_id: sessionId, discord_id: discordId, excused })
     .onConflict(["session_id", "discord_id"])
     .merge({ excused });
+  // Touching a session's roster is itself a review — a DM who marks one
+  // person absent has looked at (and implicitly confirmed) everyone else too.
+  await db()("sessions").where({ id: sessionId }).update({ attendance_confirmed_at: db().fn.now() });
 }
 
 export async function clearAbsence(campaignId: string, sessionId: string, discordId: string): Promise<void> {
   const session = await db()("sessions").where({ id: sessionId, campaign_id: campaignId }).first();
   if (!session) throw new Error("session_not_found");
   await db()("session_absences").where({ session_id: sessionId, discord_id: discordId }).delete();
+  await db()("sessions").where({ id: sessionId }).update({ attendance_confirmed_at: db().fn.now() });
+}
+
+/**
+ * Explicitly confirms an auto-completed session's roster is correct AS-IS
+ * — no absences to record, the passive "everyone attended" default just
+ * happens to be true. Distinct from markAbsent/clearAbsence because there's
+ * no roster change to imply the review; the DM has to say so directly.
+ */
+export async function confirmAttendanceAsIs(campaignId: string, sessionId: string): Promise<void> {
+  const updated = await db()("sessions")
+    .where({ id: sessionId, campaign_id: campaignId })
+    .update({ attendance_confirmed_at: db().fn.now() });
+  if (updated === 0) throw new Error("session_not_found");
 }

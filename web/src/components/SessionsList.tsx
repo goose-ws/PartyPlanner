@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, type Session, type Member } from "../api";
-import { formatDateHuman } from "../dateMath";
+import { formatDateHuman, localDateOf } from "../dateMath";
 import { buildGoogleCalendarUrl, buildOutlookUrl, icsDownloadUrl } from "../calendarLinks";
 
 const STATUS_LABEL: Record<Session["status"], string> = {
@@ -40,9 +40,19 @@ function CalendarLinks({ session, campaignId, campaignName }: { session: Session
   );
 }
 
-function RescheduleControl({ session, campaignId, onChanged }: { session: Session; campaignId: string; onChanged: () => void }) {
+function RescheduleControl({
+  session,
+  campaignId,
+  timezone,
+  onChanged,
+}: {
+  session: Session;
+  campaignId: string;
+  timezone: string;
+  onChanged: () => void;
+}) {
   const [open, setOpen] = useState(false);
-  const [date, setDate] = useState(session.scheduled_start_utc.slice(0, 10));
+  const [date, setDate] = useState(localDateOf(session.scheduled_start_utc, timezone));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -187,6 +197,7 @@ export function SessionsList({
   sessions,
   campaignId,
   campaignName,
+  timezone,
   canManage,
   members,
   onChanged,
@@ -195,6 +206,7 @@ export function SessionsList({
   sessions: Session[];
   campaignId: string;
   campaignName: string;
+  timezone: string;
   canManage: boolean;
   members: Member[];
   onChanged: () => void;
@@ -220,19 +232,43 @@ export function SessionsList({
         >
           <div>
             <span style={{ fontSize: 14 }}>
-              {s.session_number ? `Session ${s.session_number}` : "Block"} · {formatDateHuman(s.scheduled_start_utc.slice(0, 10))}
+              {s.session_number ? `Session ${s.session_number}` : "Block"} · {formatDateHuman(localDateOf(s.scheduled_start_utc, timezone))}
             </span>
             <div className="pp-mono" style={{ fontSize: 11.5, color: "var(--pp-ink-soft)", marginTop: 3 }}>
               {STATUS_LABEL[s.status]}
               {s.notes ? ` · ${s.notes}` : ""}
             </div>
+            {s.status === "completed" && !s.attendance_confirmed_at && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+                <span
+                  className="pp-mono"
+                  style={{ fontSize: 10.5, color: "var(--pp-brass)", fontWeight: 600 }}
+                  title="This session auto-completed once its end time passed — nobody's confirmed the roster below is actually correct yet"
+                >
+                  attendance not reviewed — assuming everyone attended
+                </span>
+                {canManage && (
+                  <button
+                    className="pp-btn pp-btn-ghost"
+                    style={{ fontSize: 11, padding: "2px 8px" }}
+                    onClick={async () => {
+                      await api.confirmAttendanceAsIs(campaignId, s.id);
+                      onChanged();
+                    }}
+                    title="Confirms the default roster (everyone attended) is correct — use 'Edit attendance/notes' instead if it isn't"
+                  >
+                    Confirm as shown
+                  </button>
+                )}
+              </div>
+            )}
             {(s.status === "scheduled" || s.status === "completed") && (
               <>
                 <CalendarLinks session={s} campaignId={campaignId} campaignName={campaignName} />
                 <button
                   className="pp-btn pp-btn-ghost"
                   style={{ marginTop: 6, fontSize: 11.5, padding: "3px 9px" }}
-                  onClick={() => onViewOnCalendar(s.scheduled_start_utc.slice(0, 10))}
+                  onClick={() => onViewOnCalendar(localDateOf(s.scheduled_start_utc, timezone))}
                 >
                   View on calendar
                 </button>
@@ -241,7 +277,7 @@ export function SessionsList({
           </div>
           {canManage && s.status === "scheduled" && (
             <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-              <RescheduleControl session={s} campaignId={campaignId} onChanged={onChanged} />
+              <RescheduleControl session={s} campaignId={campaignId} timezone={timezone} onChanged={onChanged} />
               <button
                 className="pp-btn pp-btn-ghost"
                 title="Reopens this block for a fresh lock"

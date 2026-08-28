@@ -107,3 +107,19 @@ export function formatInTimezone(mysqlDatetime: string, timezone: string): strin
     minute: "2-digit",
   });
 }
+
+/**
+ * The session's actual local calendar date in the campaign's timezone —
+ * NOT scheduled_start_utc.slice(0, 10), which is the UTC date and can
+ * differ from the campaign's local date near midnight (e.g. an 8pm EDT
+ * session is 00:00 UTC the *next* day). Use this anywhere a session needs
+ * to be placed on, or matched against, a specific calendar cell — the
+ * calendar grid, "view on calendar" links, session list dates, reschedule
+ * defaults, etc. Mirrors the backend's localDateOf() in reminders.ts exactly.
+ */
+export function localDateOf(mysqlDatetimeUtc: string, timezone: string): DateStr {
+  const instant = new Date(mysqlDatetimeUtc.replace(" ", "T") + "Z");
+  // en-CA's default date format is YYYY-MM-DD, which happens to be exactly
+  // what we want — no manual reassembly of the Intl parts needed.
+  return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(instant);
+}

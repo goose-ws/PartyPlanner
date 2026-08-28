@@ -118,6 +118,22 @@ export function DayDetailModal({
     setBusy(true);
     setError(null);
     try {
+      // Warn (don't block) if not everyone's confirmed for this block yet —
+      // scoring members only; someone excluded from scoring isn't expected
+      // to confirm and shouldn't hold up the lock.
+      const { confirmations } = await api.getBlockStatusForDate(campaignId, date);
+      const unconfirmedNames = availability.members
+        .filter((m) => !m.excludedFromScoring && !confirmations[m.discordId])
+        .map((m) => m.username);
+      if (unconfirmedNames.length > 0) {
+        const proceed = confirm(
+          `Not everyone has confirmed for this block yet:\n\n${unconfirmedNames.join("\n")}\n\nLock this date anyway?`
+        );
+        if (!proceed) {
+          setBusy(false);
+          return;
+        }
+      }
       await api.lockSession(campaignId, date);
       onChanged();
       onClose();

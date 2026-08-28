@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { db } from "../db/index.js";
 import { requireCampaignRole } from "../middleware/authz.js";
-import { getCandidateDates } from "../scheduling/candidateEngine.js";
+import { getCandidateDates, blockIndexOf, blockRange } from "../scheduling/candidateEngine.js";
 import {
   lockSessionDate,
   cancelSession,
@@ -12,6 +12,7 @@ import {
   listSessions,
   markAbsent,
   clearAbsence,
+  confirmAttendanceAsIs,
   updateSessionNotes,
 } from "../scheduling/sessionLifecycle.js";
 import type { AppConfig } from "../types/config.js";
@@ -201,6 +202,25 @@ export function schedulingRouter(cfg: AppConfig): Router {
   );
 
   /**
+   * Explicitly confirms an auto-completed session's roster is correct as-is
+   * — for when the passive "everyone attended" default happens to be true
+   * and there's nothing to actually change. See attendance_confirmed_at's
+   * migration comment for why this exists as its own action.
+   */
+  router.post(
+    "/campaigns/:campaignId/sessions/:sessionId/confirm-attendance",
+    requireCampaignRole(["DM"]),
+    async (req, res) => {
+      try {
+        await confirmAttendanceAsIs(req.params.campaignId!, req.params.sessionId!);
+        res.status(204).end();
+      } catch (err: any) {
+        res.status(err?.message === "session_not_found" ? 404 : 500).json({ error: err?.message ?? "confirm_attendance_failed" });
+      }
+    }
+  );
+
+  /**
    * The open blocks players can currently confirm — up to
    * campaign.confirm_ahead_sessions of them, not just the immediate next
    * one — plus per-member confirmation status for each. Powers the
@@ -216,6 +236,28 @@ export function schedulingRouter(cfg: AppConfig): Router {
       })
     );
     res.json({ blocks: results });
+  });
+
+  /**
+   * Confirmation status for the block containing an ARBITRARY date — unlike
+   * GET /block-status above, this isn't limited to the confirm_ahead_sessions
+   * window, so it also covers a DM locking a date further out than the
+   * nearest open block. Used to warn before locking a session whose block
+   * isn't fully confirmed yet.
+   */
+  router.get("/campaigns/:campaignId/block-status/for-date/:date", requireCampaignRole(["DM", "Player"]), async (req, res) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(req.params.date ?? "")) {
+      res.status(400).json({ error: "invalid_date" });
+      return;
+    }
+    const campaign = await db()("campaigns").where({ id: req.params.campaignId }).first();
+    if (!campaign) {
+      res.status(404).json({ error: "campaign_not_found" });
+      return;
+    }
+    const block = blockRange(campaign, blockIndexOf(campaign, req.params.date as string));
+    const confirmations = await getBlockConfirmationStatus(req.params.campaignId!, block);
+    res.json({ block, confirmations });
   });
 
   /** Self-service confirm/unconfirm — anyone in the campaign confirms for themselves, no DM gate needed. `blockStart` must be one of the currently-open confirmable blocks. */

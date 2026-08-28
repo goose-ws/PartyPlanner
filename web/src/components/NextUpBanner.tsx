@@ -1,5 +1,5 @@
 import type { Session, CandidateDate, Campaign } from "../api";
-import { formatInTimezone, formatDateHuman, blockIndexOf } from "../dateMath";
+import { formatInTimezone, formatDateHuman, blockIndexOf, localDateOf } from "../dateMath";
 
 export function NextUpBanner({
   campaign,
@@ -76,7 +76,7 @@ export function NextUpBanner({
       )}
       <button
         className="pp-btn pp-btn-ghost"
-        onClick={() => onViewOnCalendar(nextSession ? nextSession.scheduled_start_utc.slice(0, 10) : bestCandidate!.date)}
+        onClick={() => onViewOnCalendar(nextSession ? localDateOf(nextSession.scheduled_start_utc, campaign.timezone) : bestCandidate!.date)}
       >
         View on calendar
       </button>

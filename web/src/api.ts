@@ -80,6 +80,12 @@ export interface Session {
   status: "scheduled" | "completed" | "skipped" | "cancelled";
   notes: string | null;
   absent_discord_ids: string[];
+  // NULL means nobody's actually reviewed this session's roster yet — most
+  // often a session that auto-completed by the clock passing its end time,
+  // where the "everyone attended" you see is an unreviewed default, not a
+  // confirmed fact. Set the moment a DM backfills with an explicit roster,
+  // edits attendance/notes, or explicitly confirms the default is correct.
+  attendance_confirmed_at: string | null;
 }
 
 export interface AttendanceRow {
@@ -231,6 +237,8 @@ export const api = {
     }),
   clearAbsence: (campaignId: string, sessionId: string, discordId: string) =>
     request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/absences/${discordId}`, { method: "DELETE" }),
+  confirmAttendanceAsIs: (campaignId: string, sessionId: string) =>
+    request<void>(`/api/campaigns/${campaignId}/sessions/${sessionId}/confirm-attendance`, { method: "POST" }),
 
   getBlockStatus: (campaignId: string) =>
     request<{
@@ -240,6 +248,10 @@ export const api = {
         youConfirmed: boolean;
       }>;
     }>(`/api/campaigns/${campaignId}/block-status`),
+  getBlockStatusForDate: (campaignId: string, date: string) =>
+    request<{ block: { start: string; end: string }; confirmations: Record<string, boolean> }>(
+      `/api/campaigns/${campaignId}/block-status/for-date/${date}`
+    ),
   setBlockConfirmation: (campaignId: string, blockStart: string, confirmed: boolean) =>
     request<void>(`/api/campaigns/${campaignId}/block-status/me`, { method: "PUT", body: JSON.stringify({ blockStart, confirmed }) }),
   setMemberBlockConfirmation: (campaignId: string, discordId: string, blockStart: string, confirmed: boolean) =>

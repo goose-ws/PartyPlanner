@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { buildMonthGrid, monthLabel, todayUtc, blockIndexOf, WEEKDAY_SHORT, addMonthsToYearMonth, type DateStr } from "../dateMath";
+import { buildMonthGrid, monthLabel, todayUtc, blockIndexOf, localDateOf, WEEKDAY_SHORT, addMonthsToYearMonth, type DateStr } from "../dateMath";
 import type { CandidateDate, BlockedDate, Session, AvailabilityAll, Campaign } from "../api";
 import { PipDisplay } from "./PipMeter";
 import { buildAvailabilityMaps, computeDayScore, weightFor, flagsFor, type AvailabilityMaps } from "../scheduling";
@@ -90,7 +90,7 @@ function ScoreBreakdown({ playerScore, dmScore }: { playerScore: number; dmScore
 }
 
 /** Small text badge showing the CURRENT user's base response (Yes/If/Mb/No) + modifier (Late/Early) */
-function YourResponseDot({ weight, modifier }: { weight: number; modifier: "Late" | "Early" | null }) {
+function ResponseDot({ weight, modifier, label }: { weight: number; modifier: "Late" | "Early" | null; label: string }) {
   const baseLabel = WEIGHT_SHORT[weight];
   const color = WEIGHT_DOT_COLOR[weight];
 
@@ -100,7 +100,7 @@ function YourResponseDot({ weight, modifier }: { weight: number; modifier: "Late
 
   return (
     <span
-      title={`Your response: ${displayText}`}
+      title={`${label}: ${displayText}`}
       style={{
         position: "absolute",
         top: 3,
@@ -148,6 +148,7 @@ export function CalendarMonth({
   sessions,
   focusDate,
   currentUserId,
+  canManage,
   onDayClick,
   onChanged,
 }: {
@@ -158,6 +159,8 @@ export function CalendarMonth({
   sessions: Session[];
   focusDate?: DateStr | null;
   currentUserId: string;
+  /** DM/root only: lets them pick another member to view the "your response" dot for, at-a-glance across the month. */
+  canManage?: boolean;
   onDayClick: (date: DateStr) => void;
   onChanged: () => void;
 }) {
@@ -169,6 +172,7 @@ export function CalendarMonth({
   const [selectMode, setSelectMode] = useState(false);
   const [selectedDates, setSelectedDates] = useState<Set<DateStr>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [viewAsDiscordId, setViewAsDiscordId] = useState<string>(currentUserId);
 
   useEffect(() => {
     if (!focusDate) return;
@@ -180,11 +184,12 @@ export function CalendarMonth({
   const candidateByDate = new Map(candidates.map((c) => [c.date, c]));
   const blockedByDate = new Map(blocked.map((b) => [b.date, b]));
   const sessionByDate = new Map(
-    sessions.filter((s) => s.status !== "cancelled").map((s) => [s.scheduled_start_utc.slice(0, 10), s])
+    sessions.filter((s) => s.status !== "cancelled").map((s) => [localDateOf(s.scheduled_start_utc, campaign.timezone), s])
   );
 
   const maxPossibleScore = Math.max(1, availability.members.filter((m) => !m.excludedFromScoring).length * 3);
   const cells = buildMonthGrid(ym.year, ym.month);
+  const viewAsMemberLabel = availability.members.find((m) => m.discordId === viewAsDiscordId)?.username ?? "Member";
 
   function toggleSelect(date: DateStr, disabled: boolean) {
     if (disabled) return;
@@ -243,6 +248,40 @@ export function CalendarMonth({
           {selectMode ? "Cancel" : "Select days"}
         </button>
       </div>
+
+      {canManage && availability.members.length > 1 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+          <label htmlFor="cal-view-as" style={{ fontSize: 12, color: "var(--pp-ink-soft)" }}>
+            View as
+          </label>
+          <select
+            id="cal-view-as"
+            className="pp-input"
+            style={{ fontSize: 12, padding: "4px 8px", width: "auto" }}
+            value={viewAsDiscordId}
+            onChange={(e) => setViewAsDiscordId(e.target.value)}
+          >
+            <option value={currentUserId}>Me</option>
+            {availability.members
+              .filter((m) => m.discordId !== currentUserId)
+              .sort((a, b) => a.username.localeCompare(b.username))
+              .map((m) => (
+                <option key={m.discordId} value={m.discordId}>
+                  {m.username} ({m.role})
+                </option>
+              ))}
+          </select>
+          {viewAsDiscordId !== currentUserId && (
+            <span
+              className="pp-mono"
+              style={{ fontSize: 11, color: "var(--pp-brass)", fontWeight: 600 }}
+              title="The dot in each day cell now shows this member's response, not yours"
+            >
+              viewing another member's availability
+            </span>
+          )}
+        </div>
+      )}
 
       {selectMode && (
         <div
@@ -303,7 +342,8 @@ export function CalendarMonth({
 
           const isDisabledForEdit = isPast && !session;
           const isSelected = selectedDates.has(date);
-          const { weight, modifier } = getResponseDetails(maps, currentUserId, date);
+          const { weight, modifier } = getResponseDetails(maps, viewAsDiscordId, date);
+          const responseDotLabel = viewAsDiscordId === currentUserId ? "Your response" : `${viewAsMemberLabel}'s response`;
           const blockIdx = blockIndexOf(campaign.start_date, campaign.interval_weeks, date);
           const blockColor = BLOCK_STRIPE_COLORS[((blockIdx % 2) + 2) % 2];
 
@@ -336,7 +376,7 @@ export function CalendarMonth({
               }}
             >
               {inMonth && <BlockEdge color={blockColor} />}
-              {inMonth && <YourResponseDot weight={weight} modifier={modifier} />}
+              {inMonth && <ResponseDot weight={weight} modifier={modifier} label={responseDotLabel} />}
               <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-soft)" }}>
                 {Number(date.slice(8, 10))}
               </span>

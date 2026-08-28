@@ -12,7 +12,7 @@ import { BlockConfirmation } from "../components/BlockConfirmation";
 import { BackfillSessionForm } from "../components/BackfillSessionForm";
 import { Tabs } from "../components/Tabs";
 import { useSchedulingData } from "../hooks/useSchedulingData";
-import type { DateStr } from "../dateMath";
+import { localDateOf, type DateStr } from "../dateMath";
 
 function InviteRow({ invite, onRevoke }: { invite: Invite; onRevoke: () => void }) {
   const [copied, setCopied] = useState(false);
@@ -734,6 +734,7 @@ function CampaignTabs({
         sessions={sessions}
         focusDate={focusDate}
         currentUserId={user.discordId}
+        canManage={canManage}
         onDayClick={setSelectedDate}
         onChanged={reload}
       />
@@ -746,7 +747,7 @@ function CampaignTabs({
           user={user}
           availability={availability}
           candidate={candidates.find((c) => c.date === selectedDate)}
-          session={sessions.find((s) => s.scheduled_start_utc.slice(0, 10) === selectedDate && s.status !== "cancelled")}
+          session={sessions.find((s) => localDateOf(s.scheduled_start_utc, campaign.timezone) === selectedDate && s.status !== "cancelled")}
           onClose={() => setSelectedDate(null)}
           onChanged={reload}
         />
@@ -761,6 +762,7 @@ function CampaignTabs({
         sessions={sessions}
         campaignId={campaign.id}
         campaignName={campaign.name}
+        timezone={campaign.timezone}
         canManage={canManage}
         members={availability.members}
         onChanged={reload}
