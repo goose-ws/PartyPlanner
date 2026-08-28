@@ -24,9 +24,17 @@ function formatLocal(utcDate: Date, timezone: string): string {
   return DateTime.fromJSDate(utcDate, { zone: "utc" }).setZone(timezone).toFormat("cccc, LLLL d 'at' h:mm a ZZZZ");
 }
 
-function daysUntil(target: Date): number {
-  const now = DateTime.now();
-  const then = DateTime.fromJSDate(target);
+/**
+ * Calendar days from "now" until `target`, both measured in the campaign's
+ * own timezone. DateTime.now() and DateTime.fromJSDate() default to the
+ * HOST's local zone when no zone is given — exactly the same latent bug
+ * class as dateMath.ts's old todayUtc() (see its comment): "how many days
+ * until this session" depends on which zone you're counting calendar-day
+ * boundaries in, and the host's zone isn't necessarily the campaign's.
+ */
+function daysUntil(target: Date, timezone: string): number {
+  const now = DateTime.now().setZone(timezone);
+  const then = DateTime.fromJSDate(target, { zone: timezone });
   return Math.max(0, Math.ceil(then.diff(now, "days").days));
 }
 
@@ -61,7 +69,7 @@ export async function announceSessionLocked(
 ): Promise<void> {
   if (!campaign.discord_webhook_url) return;
   const when = formatLocal(startUtc, campaign.timezone);
-  const days = daysUntil(startUtc);
+  const days = daysUntil(startUtc, campaign.timezone);
   const links = calendarLinksSection(campaign, sessionId, sessionNumber, startUtc, endUtc, publicUrl);
 
   const localDate = DateTime.fromJSDate(startUtc, { zone: "utc" }).setZone(campaign.timezone).toFormat("yyyy-LL-dd") as DateStr;
@@ -109,7 +117,7 @@ export async function announceSessionRescheduled(
 ): Promise<void> {
   if (!campaign.discord_webhook_url) return;
   const when = formatLocal(newStartUtc, campaign.timezone);
-  const days = daysUntil(newStartUtc);
+  const days = daysUntil(newStartUtc, campaign.timezone);
   const links = calendarLinksSection(campaign, sessionId, sessionNumber, newStartUtc, newEndUtc, publicUrl);
   const description =
     `🔁 **${campaign.name}** has moved to ${when}\n` +

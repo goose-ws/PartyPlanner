@@ -3,6 +3,22 @@ import { DateTime } from "luxon";
 /** All dates in this module are plain 'YYYY-MM-DD' strings — no timezone, no Date objects. */
 export type DateStr = string;
 
+/**
+ * Parses a MySQL DATETIME/TIMESTAMP string (always a true UTC instant in
+ * this app, thanks to knexfile's `dateStrings: true` on reads and
+ * `timezone: "Z"` on writes) into a real Date. This exists because
+ * `new Date("2026-09-15 20:00:00")` — the raw string mysql2 hands back,
+ * space-separated with no zone — is NOT valid ISO 8601, and V8 parses that
+ * specific non-conforming shape as LOCAL time, not UTC. Passing the raw
+ * string straight into `new Date()` anywhere in this codebase silently
+ * reintroduces the exact bug the dateStrings/timezone config was set up to
+ * avoid. Always go through this (or manually append "Z" the same way)
+ * instead of calling `new Date()` directly on a DB-sourced datetime string.
+ */
+export function parseUtcDatetime(mysqlDatetime: string): Date {
+  return new Date(mysqlDatetime.replace(" ", "T") + "Z");
+}
+
 function toEpochDay(date: DateStr): number {
   const [y, m, d] = date.split("-").map(Number);
   return Math.floor(Date.UTC(y!, m! - 1, d!) / 86_400_000);

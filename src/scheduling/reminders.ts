@@ -526,14 +526,19 @@ async function checkLockWarning(campaign: any): Promise<void> {
   // session quota — for the common sessions_per_interval=1 case that's
   // equivalent to "nothing locked yet," but check occupancy explicitly so
   // this stays correct for campaigns that run multiple sessions per block.
-  const occupancy = await db()("sessions")
+  // Filtered in JS against each session's campaign-LOCAL date rather than a
+  // SQL range against block.start/block.end directly — those are local
+  // calendar dates, not UTC ones, so comparing them straight against the
+  // UTC scheduled_start_utc column would misfire right at a block boundary
+  // whenever the campaign's session time crosses UTC midnight (the same
+  // bug class as the old todayUtc()/daysUntil() — see their comments).
+  const campaignSessions: Array<{ scheduled_start_utc: string; status: string }> = await db()("sessions")
     .where({ campaign_id: campaign.id })
-    .whereIn("status", ["scheduled", "completed"])
-    .andWhere("scheduled_start_utc", ">=", `${block.start} 00:00:00`)
-    .andWhere("scheduled_start_utc", "<", `${block.end} 00:00:00`)
-    .count("* as count")
-    .first();
-  if (Number(occupancy?.count ?? 0) > 0) return;
+    .whereIn("status", ["scheduled", "completed"]);
+  const occupancy = campaignSessions.filter(
+    (s) => blockIndexOf(campaign, localDateOf(s.scheduled_start_utc, campaign.timezone)) === block.index
+  ).length;
+  if (occupancy > 0) return;
 
   const dms: Array<{ discord_id: string }> = await db()("campaign_members").where({ campaign_id: campaign.id, role: "DM" });
   if (dms.length === 0) return;

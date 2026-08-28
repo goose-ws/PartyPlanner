@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { db } from "../db/index.js";
 import type { AuthedUser } from "../types/express.js";
+import { parseUtcDatetime } from "../scheduling/dateMath.js";
 
 /**
  * Sessions are intentionally dumb: user_sessions just maps an opaque sid to
@@ -53,7 +54,7 @@ export async function resolveSession(
 
   if (!row) return null;
 
-  const remainingMs = new Date(row.expires).getTime() - Date.now();
+  const remainingMs = parseUtcDatetime(row.expires).getTime() - Date.now();
   const renewalThresholdMs = maxAgeSeconds * 1000 * 0.9;
   if (remainingMs < renewalThresholdMs) {
     const newExpires = new Date(Date.now() + maxAgeSeconds * 1000);

@@ -4,6 +4,7 @@ import type { AppConfig } from "../types/config.js";
 import { requireRoot } from "../middleware/authz.js";
 import { writeStoredConfig } from "../configStore.js";
 import { db } from "../db/index.js";
+import { parseUtcDatetime } from "../scheduling/dateMath.js";
 
 const REVEALABLE_FIELDS = new Set(["dbPassword", "discordClientSecret"]);
 
@@ -123,7 +124,9 @@ export function coreSettingsRouter(cfg: AppConfig): Router {
         actorDiscordId: r.actor_discord_id,
         event: r.event,
         detail: r.detail ? JSON.parse(r.detail) : null,
-        createdAt: r.created_at,
+        // See dateMath.ts's parseUtcDatetime() — the raw DB string has no
+        // zone marker and new Date() on it is parsed as local time, not UTC.
+        createdAt: parseUtcDatetime(r.created_at).toISOString(),
       })),
     });
   });

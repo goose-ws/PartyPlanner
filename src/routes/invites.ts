@@ -5,6 +5,7 @@ import { db } from "../db/index.js";
 import { requireCampaignRole } from "../middleware/authz.js";
 import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
 import { logAudit } from "../audit.js";
+import { parseUtcDatetime } from "../scheduling/dateMath.js";
 
 function generateToken(): string {
   return crypto.randomBytes(24).toString("base64url");
@@ -40,7 +41,7 @@ async function checkInviteValidity(token: string): Promise<{ ok: true } | { ok: 
   const invite = await db()("campaign_invites").where({ token }).first();
   if (!invite) return { ok: false, reason: "not_found" };
   if (invite.revoked_at) return { ok: false, reason: "revoked" };
-  if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) return { ok: false, reason: "expired" };
+  if (invite.expires_at && parseUtcDatetime(invite.expires_at).getTime() < Date.now()) return { ok: false, reason: "expired" };
   if (invite.max_uses !== null && invite.uses >= invite.max_uses) return { ok: false, reason: "exhausted" };
   return { ok: true };
 }
@@ -55,7 +56,7 @@ export async function redeemInvite(
   const invite = await db()("campaign_invites").where({ token }).first();
   if (!invite) return { ok: false, reason: "not_found" };
   if (invite.revoked_at) return { ok: false, reason: "revoked" };
-  if (invite.expires_at && new Date(invite.expires_at).getTime() < Date.now()) return { ok: false, reason: "expired" };
+  if (invite.expires_at && parseUtcDatetime(invite.expires_at).getTime() < Date.now()) return { ok: false, reason: "expired" };
   if (invite.max_uses !== null && invite.uses >= invite.max_uses) return { ok: false, reason: "exhausted" };
 
   const isNewMember = await addMemberIfAbsent(invite.campaign_id, discordId, invite.role);
@@ -128,9 +129,14 @@ export function invitesApiRouter(cfg: AppConfig): Router {
         role: i.role,
         uses: i.uses,
         maxUses: i.max_uses,
-        expiresAt: i.expires_at,
-        revokedAt: i.revoked_at,
-        createdAt: i.created_at,
+        // .toISOString() so the wire format is unambiguous UTC — the raw
+        // value read back from the DB is a bare "YYYY-MM-DD HH:MM:SS"
+        // string with no zone marker, and `new Date(...)` on that specific
+        // shape is parsed as LOCAL time by JS engines, not UTC. See
+        // dateMath.ts's parseUtcDatetime() for the full explanation.
+        expiresAt: i.expires_at ? parseUtcDatetime(i.expires_at).toISOString() : null,
+        revokedAt: i.revoked_at ? parseUtcDatetime(i.revoked_at).toISOString() : null,
+        createdAt: parseUtcDatetime(i.created_at).toISOString(),
       })),
     });
   });

@@ -1,4 +1,5 @@
 import { DateTime } from "luxon";
+import type { Knex } from "knex";
 import { db } from "../db/index.js";
 import { addDays, addMonths, dayOfWeek, diffDays, localToday, maxDate, type DateStr } from "./dateMath.js";
 
@@ -45,6 +46,43 @@ export function blockRange(campaign: Pick<CampaignCadence, "start_date" | "inter
   const start = addDays(campaign.start_date, blockIndex * blockLengthDays);
   const end = addDays(start, blockLengthDays); // exclusive
   return { start, end };
+}
+
+/**
+ * Every campaign member's raw response weight (0-3) for one specific date —
+ * used to snapshot "who's actually expected to attend" at the moment a
+ * session gets locked (or rescheduled to a new date), so that becomes the
+ * attendance record instead of a blind "everyone showed up" default.
+ * Independent of scoring exclusion — attendance and scoring are different
+ * concerns, so this includes every member regardless of
+ * excluded_from_scoring. Accepts an optional transaction so a caller
+ * already inside one reads a fully consistent snapshot.
+ */
+export async function getMemberWeightsForDate(campaignId: string, date: DateStr, trx: Knex = db()): Promise<Map<string, number>> {
+  const members: Array<{ discord_id: string }> = await trx("campaign_members").where({ campaign_id: campaignId });
+  const defaultsRows: Array<{ discord_id: string; day_of_week: number; weight: number }> = await trx(
+    "default_availability"
+  ).where({ campaign_id: campaignId });
+  const specificRows: Array<{ discord_id: string; weight: number }> = await trx("specific_availability").where({
+    campaign_id: campaignId,
+    date_utc: date,
+  });
+
+  const defaultsByMember = new Map<string, Map<number, number>>();
+  for (const row of defaultsRows) {
+    if (!defaultsByMember.has(row.discord_id)) defaultsByMember.set(row.discord_id, new Map());
+    defaultsByMember.get(row.discord_id)!.set(row.day_of_week, row.weight);
+  }
+  const specificByMember = new Map<string, number>();
+  for (const row of specificRows) specificByMember.set(row.discord_id, row.weight);
+
+  const dow = dayOfWeek(date);
+  const result = new Map<string, number>();
+  for (const m of members) {
+    const override = specificByMember.get(m.discord_id);
+    result.set(m.discord_id, override !== undefined ? override : (defaultsByMember.get(m.discord_id)?.get(dow) ?? 0));
+  }
+  return result;
 }
 
 /**

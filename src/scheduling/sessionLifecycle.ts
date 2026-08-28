@@ -4,7 +4,7 @@ import type { Knex } from "knex";
 import { db } from "../db/index.js";
 import { addDays, type DateStr } from "./dateMath.js";
 import { announceSessionLocked, announceSessionCancelled, announceBlockSkipped, announceSessionRescheduled } from "../discord/announcements.js";
-import { blockIndexOf } from "./candidateEngine.js";
+import { blockIndexOf, getMemberWeightsForDate } from "./candidateEngine.js";
 import { logAudit } from "../audit.js";
 
 interface CampaignForLifecycle {
@@ -109,8 +109,23 @@ export async function lockSessionDate(campaignId: string, date: DateStr, publicU
       scheduled_start_utc: startUtc,
       scheduled_end_utc: endUtc,
       status: "scheduled",
+      // The snapshot below IS the review — "listed attendance at the time a
+      // session is locked is the actual attendance" — so there's nothing
+      // left to confirm later the way an unreviewed auto-complete would need.
+      attendance_confirmed_at: trx.fn.now(),
     });
     await trx("campaigns").where({ id: campaignId }).update({ last_session_number: nextNumber });
+
+    // Snapshot attendance from availability as of right now: anyone who
+    // said "No" (weight 0) for this date is recorded absent immediately,
+    // rather than defaulting everyone to "attended" and hoping someone
+    // corrects it later. A DM can still hand-edit this afterward (e.g. a
+    // "Yes" who ended up not making it) via the Sessions tab.
+    const weights = await getMemberWeightsForDate(campaignId, date, trx);
+    const absentRows = [...weights.entries()]
+      .filter(([, weight]) => weight === 0)
+      .map(([discordId]) => ({ session_id: id, discord_id: discordId, excused: true }));
+    if (absentRows.length > 0) await trx("session_absences").insert(absentRows);
 
     return { id, sessionNumber: nextNumber, scheduledStartUtc: startUtc, scheduledEndUtc: endUtc, campaign };
   });
@@ -221,7 +236,18 @@ export async function rescheduleSession(campaignId: string, sessionId: string, n
     const { startUtc, endUtc } = localSessionWindowToUtc(campaign, newDate);
     await trx("sessions")
       .where({ id: sessionId })
-      .update({ scheduled_start_utc: startUtc, scheduled_end_utc: endUtc });
+      .update({ scheduled_start_utc: startUtc, scheduled_end_utc: endUtc, attendance_confirmed_at: trx.fn.now() });
+
+    // The old attendance snapshot was taken for the OLD date and is now
+    // stale — re-snapshot against the new date the same way lockSessionDate
+    // does, rather than leaving yesterday's absence list attached to a
+    // session that's now scheduled for a different day.
+    await trx("session_absences").where({ session_id: sessionId }).delete();
+    const weights = await getMemberWeightsForDate(campaignId, newDate, trx);
+    const absentRows = [...weights.entries()]
+      .filter(([, weight]) => weight === 0)
+      .map(([discordId]) => ({ session_id: sessionId, discord_id: discordId, excused: true }));
+    if (absentRows.length > 0) await trx("session_absences").insert(absentRows);
 
     // The date change can shift this session's chronological position
     // relative to the others, so its number may no longer be correct —

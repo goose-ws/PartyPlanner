@@ -20,6 +20,7 @@ import { buildSessionIcs } from "../scheduling/ics.js";
 import { resolveCampaignParam } from "../middleware/resolveCampaign.js";
 import { composeStageReminder, composeDayOfReminder, getOpenBlocks } from "../scheduling/reminders.js";
 import { getBlockConfirmationStatus, confirmBlock, unconfirmBlock } from "../scheduling/blockConfirmations.js";
+import { parseUtcDatetime } from "../scheduling/dateMath.js";
 import { sendDiscordMessage } from "../discord/webhook.js";
 import { logAudit } from "../audit.js";
 
@@ -429,7 +430,7 @@ export function schedulingRouter(cfg: AppConfig): Router {
         };
       }),
       sessionCounts: Object.fromEntries(counts.map((c: any) => [c.status, Number(c.count)])),
-      campaignAgeDays: Math.floor((Date.now() - new Date(campaign.created_at).getTime()) / 86_400_000),
+      campaignAgeDays: Math.floor((Date.now() - parseUtcDatetime(campaign.created_at).getTime()) / 86_400_000),
     });
   });
 
