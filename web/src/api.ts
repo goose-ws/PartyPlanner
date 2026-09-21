@@ -269,7 +269,9 @@ export const api = {
       entries: Array<{
         id: number;
         campaignId: string | null;
+        campaignName: string | null;
         actorDiscordId: string | null;
+        actorUsername: string | null;
         event: string;
         detail: Record<string, unknown> | null;
         createdAt: string;

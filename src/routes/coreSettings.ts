@@ -117,17 +117,61 @@ export function coreSettingsRouter(cfg: AppConfig): Router {
       query = query.where("id", "<", Number(req.query.before));
     }
     const rows = await query;
+    const parsedDetails: Array<Record<string, unknown> | null> = rows.map((r) => (r.detail ? JSON.parse(r.detail) : null));
+
+    // Batch-resolve every Discord ID referenced anywhere on this page —
+    // each row's actor, plus any *DiscordId field buried in its `detail`
+    // blob (targetDiscordId, demotedDiscordId, ...) — into usernames with
+    // two queries total, rather than one per row. IDs are always kept
+    // as-is alongside the resolved name, since the ID is still what's
+    // authoritative (e.g. for someone who's since left the campaign, where
+    // the username lookup below will just come back null).
+    const discordIds = new Set<string>();
+    for (const r of rows) if (r.actor_discord_id) discordIds.add(r.actor_discord_id);
+    for (const detail of parsedDetails) {
+      if (!detail || typeof detail !== "object") continue;
+      for (const [key, value] of Object.entries(detail)) {
+        if (key.endsWith("DiscordId") && typeof value === "string") discordIds.add(value);
+      }
+    }
+    const campaignIds = new Set(rows.map((r) => r.campaign_id).filter((id): id is string => !!id));
+
+    const [users, campaigns] = await Promise.all([
+      discordIds.size > 0
+        ? db()("users")
+            .whereIn("discord_id", [...discordIds])
+            .select("discord_id", db().raw("COALESCE(global_name, username) as username"))
+        : Promise.resolve([]),
+      campaignIds.size > 0 ? db()("campaigns").whereIn("id", [...campaignIds]).select("id", "name") : Promise.resolve([]),
+    ]);
+    const usernameOf = new Map<string, string>(users.map((u: { discord_id: string; username: string }) => [u.discord_id, u.username]));
+    const campaignNameOf = new Map<string, string>(campaigns.map((c: { id: string; name: string }) => [c.id, c.name]));
+
     res.json({
-      entries: rows.map((r) => ({
-        id: r.id,
-        campaignId: r.campaign_id,
-        actorDiscordId: r.actor_discord_id,
-        event: r.event,
-        detail: r.detail ? JSON.parse(r.detail) : null,
-        // See dateMath.ts's parseUtcDatetime() — the raw DB string has no
-        // zone marker and new Date() on it is parsed as local time, not UTC.
-        createdAt: parseUtcDatetime(r.created_at).toISOString(),
-      })),
+      entries: rows.map((r, i) => {
+        const detail = parsedDetails[i] ?? null;
+        let enrichedDetail: Record<string, unknown> | null = detail;
+        if (detail && typeof detail === "object") {
+          enrichedDetail = { ...detail };
+          for (const [key, value] of Object.entries(detail)) {
+            if (key.endsWith("DiscordId") && typeof value === "string") {
+              enrichedDetail[key.replace(/DiscordId$/, "Username")] = usernameOf.get(value) ?? null;
+            }
+          }
+        }
+        return {
+          id: r.id,
+          campaignId: r.campaign_id,
+          campaignName: r.campaign_id ? (campaignNameOf.get(r.campaign_id) ?? null) : null,
+          actorDiscordId: r.actor_discord_id,
+          actorUsername: r.actor_discord_id ? (usernameOf.get(r.actor_discord_id) ?? null) : null,
+          event: r.event,
+          detail: enrichedDetail,
+          // See dateMath.ts's parseUtcDatetime() — the raw DB string has no
+          // zone marker and new Date() on it is parsed as local time, not UTC.
+          createdAt: parseUtcDatetime(r.created_at).toISOString(),
+        };
+      }),
     });
   });
 

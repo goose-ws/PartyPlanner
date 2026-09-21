@@ -100,11 +100,27 @@ if (!isSetupComplete(cfg)) {
   // timer is sufficient; no external cron or job queue needed. State that
   // prevents duplicate sends lives in the DB (campaigns.last_reminder_*),
   // so this is safe across restarts and doesn't need its own persistence.
-  const REMINDER_CHECK_INTERVAL_MS = 60 * 60 * 1000; // hourly
+  //
+  // Aligned to wall-clock 5-minute marks (:00, :05, :10, ...) rather than
+  // "every hour from whenever the process happened to boot" — the old
+  // version ran hourly starting 30s after boot, so a container that booted
+  // at, say, 8:54 would check at 8:54, 9:54, 10:54... forever, meaning a
+  // campaign's reminder_time_of_day of "09:00" wouldn't actually fire until
+  // the 9:54 check. Checking every 5 minutes, aligned to the clock, bounds
+  // that drift to at most 5 minutes regardless of when the container starts.
+  const REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+  function msUntilNextAlignedTick(intervalMs: number): number {
+    return intervalMs - (Date.now() % intervalMs);
+  }
   setTimeout(() => {
+    // One immediate check right after boot (DB should be warmed up by now),
+    // then hand off to the wall-clock-aligned recurring schedule below.
     runReminderCheck(cfg).catch((err) => console.error("[reminders] Initial check failed:", err));
-    setInterval(() => {
+    setTimeout(() => {
       runReminderCheck(cfg).catch((err) => console.error("[reminders] Scheduled check failed:", err));
-    }, REMINDER_CHECK_INTERVAL_MS);
+      setInterval(() => {
+        runReminderCheck(cfg).catch((err) => console.error("[reminders] Scheduled check failed:", err));
+      }, REMINDER_CHECK_INTERVAL_MS);
+    }, msUntilNextAlignedTick(REMINDER_CHECK_INTERVAL_MS));
   }, 30_000); // wait 30s after boot so DB connections are warmed up first
 }

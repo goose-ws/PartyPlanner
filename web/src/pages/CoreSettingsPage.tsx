@@ -3,7 +3,16 @@ import { api, type CoreSettings } from "../api";
 
 function AuditLogViewer() {
   const [entries, setEntries] = useState<
-    Array<{ id: number; campaignId: string | null; actorDiscordId: string | null; event: string; detail: Record<string, unknown> | null; createdAt: string }>
+    Array<{
+      id: number;
+      campaignId: string | null;
+      campaignName: string | null;
+      actorDiscordId: string | null;
+      actorUsername: string | null;
+      event: string;
+      detail: Record<string, unknown> | null;
+      createdAt: string;
+    }>
   >([]);
   const [eventFilter, setEventFilter] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -59,13 +68,13 @@ function AuditLogViewer() {
                 {e.event}
               </span>
               {e.actorDiscordId && (
-                <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-soft)" }}>
-                  by {e.actorDiscordId}
+                <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-soft)" }} title={e.actorDiscordId}>
+                  by {e.actorUsername ?? `${e.actorDiscordId.slice(0, 8)}… (no longer in the system)`}
                 </span>
               )}
               {e.campaignId && (
-                <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-faint)" }}>
-                  campaign {e.campaignId.slice(0, 8)}…
+                <span className="pp-mono" style={{ fontSize: 11, color: "var(--pp-ink-faint)" }} title={e.campaignId}>
+                  campaign {e.campaignName ?? `${e.campaignId.slice(0, 8)}… (deleted)`}
                 </span>
               )}
             </div>
